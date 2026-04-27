@@ -102,36 +102,40 @@ local function render_list()
   local specs         = {}
   state.line_conv_map = {}
 
-  -- account header
-  local acct = state.account or ""
-  table.insert(lines, "  " .. acct)
-  table.insert(specs, { hl = "SignalTime", line = 1, col_s = 0, col_e = -1 })
-  table.insert(lines, "  " .. string.rep("─", win_width - 4))
-  table.insert(specs, { hl = "SignalTime", line = 2, col_s = 0, col_e = -1 })
-  table.insert(lines, "")
-
   local function push_divider(label)
-    local pad  = win_width - #label - 8
-    local bar  = string.rep("─", math.max(2, math.floor(pad / 2)))
-    local line = "  " .. bar .. "  " .. label .. "  " .. bar
+    local hl   = label == "Pinned" and "SignalPinned"
+      or         label == "Groups" and "SignalGroup"
+      or         "SignalName"
+    local dot  = "●"
+    local head = "  " .. dot .. "  " .. label
+    local bar  = string.rep("─", math.max(2, win_width - #head - 3))
+    local line = head .. "  " .. bar
     local lnum = #lines
+
     table.insert(lines, line)
-    table.insert(specs, { hl = "SignalTime", line = lnum, col_s = 0, col_e = -1 })
     table.insert(lines, "")
+
+    -- dot colored per section, label same color, trailing bar very dim
+    table.insert(specs, { hl = hl,                line = lnum, col_s = 2, col_e = 2 + #dot })
+    table.insert(specs, { hl = hl,                line = lnum, col_s = 2 + #dot + 2, col_e = #head })
+    table.insert(specs, { hl = "SignalDividerBar", line = lnum, col_s = #head + 2, col_e = -1 })
   end
 
+  local DOT = "●"   -- U+25CF, 3 bytes
   local function push_conv(c)
-    local is_pinned = state.pinned[c.id]
-    local icon      = c.kind == "group" and "  " or "  "
-    local pin_pfx   = is_pinned and "📌 " or ""
-    local name      = pin_pfx .. (c.name or c.id or "Unknown")
-    local snippet   = c.snippet or ""
-    local badge     = (c.unread and c.unread > 0) and (" [" .. c.unread .. "]") or ""
-    local timestr   = (c.time or "") .. badge
-    local prefix    = "  " .. icon
-    local gap       = math.max(1, win_width - #prefix - #name - #timestr - 2)
-    local line1     = prefix .. name .. string.rep(" ", gap) .. timestr
-    local line2     = "    " .. snippet:sub(1, win_width - 6)
+    local is_pinned  = state.pinned[c.id]
+    local has_unread = c.unread and c.unread > 0
+    local icon       = c.kind == "group" and "  " or "  "
+    local name       = c.name or c.id or "Unknown"
+    local snippet    = c.snippet or ""
+    local badge      = has_unread and (" [" .. c.unread .. "]") or ""
+    local timestr    = (c.time or "") .. badge
+
+    -- prefix is always same byte length: DOT + " " + icon
+    local prefix  = DOT .. " " .. icon
+    local gap     = math.max(1, win_width - #prefix - #name - #timestr - 2)
+    local line1   = prefix .. name .. string.rep(" ", gap) .. timestr
+    local line2   = "      " .. snippet:sub(1, win_width - 8)
 
     local name_lnum    = #lines
     local snippet_lnum = #lines + 1
@@ -143,11 +147,23 @@ local function render_list()
     state.line_conv_map[name_lnum + 1]    = c
     state.line_conv_map[snippet_lnum + 1] = c
 
-    local name_hl = c.kind == "group" and "SignalGroup" or "SignalName"
-    local name_s  = #prefix
-    table.insert(specs, { hl = name_hl,      line = name_lnum, col_s = name_s, col_e = name_s + #name })
-    local time_s  = #line1 - #timestr
-    local time_e  = time_s + #(c.time or "")
+    -- unread dot: bright red when unread, near-invisible when read
+    local dot_hl = has_unread and "SignalUnread" or "SignalDividerBar"
+    table.insert(specs, { hl = dot_hl, line = name_lnum, col_s = 0, col_e = #DOT })
+
+    -- icon colored per type
+    local icon_hl = c.kind == "group" and "SignalGroup" or "SignalName"
+    table.insert(specs, { hl = icon_hl, line = name_lnum, col_s = #DOT + 1, col_e = #DOT + 1 + #icon })
+
+    -- name: gold for pinned, else type color
+    local name_hl = is_pinned and "SignalPinned"
+      or c.kind == "group" and "SignalGroup"
+      or "SignalName"
+    local name_s = #prefix
+    table.insert(specs, { hl = name_hl, line = name_lnum, col_s = name_s, col_e = name_s + #name })
+
+    local time_s = #line1 - #timestr
+    local time_e = time_s + #(c.time or "")
     if #(c.time or "") > 0 then
       table.insert(specs, { hl = "SignalTime",   line = name_lnum, col_s = time_s, col_e = time_e })
     end
