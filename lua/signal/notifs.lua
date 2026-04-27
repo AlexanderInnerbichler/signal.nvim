@@ -105,6 +105,10 @@ local function process_messages(messages)
   end
 end
 
+function M.show_sent_toast()
+  show_toast("✓ Sent")
+end
+
 function M.get_unread(id)
   return state.unread[id] or 0
 end
@@ -118,6 +122,8 @@ function M.setup()
     state.timer:close()
     state.timer = nil
   end
+
+  if config.get().debug then return end
 
   local ok = config.ready()
   if not ok then return end

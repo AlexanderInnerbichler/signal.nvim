@@ -153,6 +153,7 @@ local function open_input()
       local thread = DEBUG_THREADS[conv.id] or {}
       table.insert(thread, { source = state.account, message = body, timestamp = now_ms() })
       DEBUG_THREADS[conv.id] = thread
+      require("signal.notifs").show_sent_toast()
       M.refresh()
       return
     end
@@ -160,6 +161,7 @@ local function open_input()
       if err then
         vim.notify("signal.nvim: send failed: " .. err, vim.log.levels.ERROR)
       else
+        require("signal.notifs").show_sent_toast()
         M.refresh()
       end
     end)
