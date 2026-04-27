@@ -56,7 +56,7 @@ local function flush()
   local specs = {}
   for i, entry in ipairs(state.log) do
     local kind = KINDS[entry.kind] or KINDS.info
-    table.insert(lines, kind.prefix .. (entry.text or ""))
+    table.insert(lines, kind.prefix .. (entry.text or ""):gsub("[\r\n]", " "))
     if kind.hl then
       table.insert(specs, { hl = kind.hl, line = i, col_s = 0, col_e = -1 })
     end
@@ -76,7 +76,17 @@ local function flush()
 end
 
 local function log(kind, text)
-  table.insert(state.log, { kind = kind, text = text })
+  text = text or ""
+  if text:find("[\r\n]") then
+    for _, line in ipairs(vim.split(text, "\n", { plain = true })) do
+      line = vim.trim(line)
+      if line ~= "" then
+        table.insert(state.log, { kind = kind, text = line })
+      end
+    end
+  else
+    table.insert(state.log, { kind = kind, text = text })
+  end
   flush()
 end
 
