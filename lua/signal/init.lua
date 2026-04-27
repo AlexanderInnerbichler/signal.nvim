@@ -111,7 +111,22 @@ function M.register_keymaps()
   end)
 end
 
+local DEBUG_CONVS = {
+  { id = "+43111000001", name = "Alice",        kind = "contact", snippet = "Hey, how are you?",   time = "12:34", unread = 2 },
+  { id = "+43111000002", name = "Bob",          kind = "contact", snippet = "See you tomorrow!",   time = "09:11", unread = 0 },
+  { id = "+43111000003", name = "Charlie",      kind = "contact", snippet = "",                    time = "Mon",   unread = 0 },
+  { id = "group-abc",   name = "Family Group",  kind = "group",   snippet = "Dinner on Sunday?",   time = "Tue",   unread = 1 },
+  { id = "group-xyz",   name = "Work Team",     kind = "group",   snippet = "PR merged ✓",         time = "Wed",   unread = 0 },
+}
+
 function M.fetch_and_render()
+  if config.get().debug then
+    state.conversations = vim.deepcopy(DEBUG_CONVS)
+    state.is_loading    = false
+    render_list()
+    return
+  end
+
   state.is_loading = true
   render_list()
 
@@ -193,6 +208,7 @@ local function open_win()
     vim.wo[state.win].signcolumn     = "no"
     vim.wo[state.win].cursorline     = true
     vim.wo[state.win].wrap           = false
+    vim.wo[state.win].foldenable     = false
   end
 end
 
@@ -212,6 +228,13 @@ function M.close()
 end
 
 function M.open()
+  if config.get().debug then
+    state.account = "+43000000000"
+    open_win()
+    M.register_keymaps()
+    M.fetch_and_render()
+    return
+  end
   local ok, err = config.ready()
   if not ok then
     vim.notify("signal.nvim: " .. err, vim.log.levels.WARN)
