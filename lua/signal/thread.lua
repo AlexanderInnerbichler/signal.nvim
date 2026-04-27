@@ -26,9 +26,23 @@ local function write_buf(lines, specs)
   end
 end
 
-local function ts_to_hhmm(ts)
+local function format_ts(ts)
   if not ts or ts == 0 then return "" end
-  return os.date("%H:%M", math.floor(ts / 1000))
+  local t        = math.floor(ts / 1000)
+  local now      = os.time()
+  local day_secs = 86400
+  -- floor to local midnight using offset trick
+  local tz_off   = os.time(os.date("*t", now)) - os.time(os.date("!*t", now))
+  local today_s  = math.floor((now + tz_off) / day_secs) * day_secs - tz_off
+  if t >= today_s then
+    return os.date("%H:%M", t)
+  elseif t >= today_s - day_secs then
+    return "Yesterday " .. os.date("%H:%M", t)
+  elseif t >= today_s - 6 * day_secs then
+    return os.date("%a %H:%M", t)
+  else
+    return os.date("%d %b", t)
+  end
 end
 
 local function render()
@@ -60,7 +74,7 @@ local function render()
   for _, msg in ipairs(state.messages) do
     local is_self  = msg.source == state.account
     local sender   = is_self and "You" or (conv and conv.name or msg.source or "?")
-    local time_str = ts_to_hhmm(msg.timestamp)
+    local time_str = format_ts(msg.timestamp)
     local body     = msg.message or ""
 
     local header_ln = #lines
