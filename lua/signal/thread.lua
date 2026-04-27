@@ -238,6 +238,40 @@ local DEBUG_THREADS = {
     { source = "+43000000000", message = "On it.",                                 timestamp = ago_ms(295) },
     { source = "+43111000002", message = "PR merged — deploying now",              timestamp = ago_ms(10)  },
   },
+  ["+43111000004"] = {  -- Mia
+    { source = "+43000000000", message = "Hey, what's up?",                        timestamp = ago_ms(80)  },
+    { source = "+43111000004", message = "Not much, busy day.",                     timestamp = ago_ms(75)  },
+    { source = "+43111000004", message = "Can you call me later?",                  timestamp = ago_ms(12)  },
+    { source = "+43111000004", message = "It's important.",                         timestamp = ago_ms(11)  },
+    { source = "+43111000004", message = "Like, really important.",                 timestamp = ago_ms(3)   },
+  },
+  ["+43111000005"] = {  -- David
+    { source = "+43000000000", message = "Do you know how to fix this webpack issue?", timestamp = ago_ms(1440) },
+    { source = "+43111000005", message = "Yeah, try clearing node_modules.",         timestamp = ago_ms(1435) },
+    { source = "+43000000000", message = "That worked, legend!",                    timestamp = ago_ms(1430) },
+    { source = "+43111000005", message = "Thanks for the help!",                    timestamp = ago_ms(1428) },
+  },
+  ["+43111000006"] = {  -- Sophie
+    { source = "+43111000006", message = "Running 10 min late, sorry",              timestamp = ago_ms(25)  },
+    { source = "+43000000000", message = "No worries, I'll grab a coffee",          timestamp = ago_ms(23)  },
+  },
+  ["+43111000007"] = {  -- Lukas (no recent)
+    { source = "+43111000007", message = "Good game yesterday",                     timestamp = ago_ms(5760) },
+    { source = "+43000000000", message = "Yeah was fun, rematch soon?",             timestamp = ago_ms(5758) },
+  },
+  ["group-def"] = {  -- Team Sprint
+    { source = "+43111000002", message = "Sprint planning in 10",                   timestamp = ago_ms(600) },
+    { source = "+43111000005", message = "On my way",                               timestamp = ago_ms(595) },
+    { source = "+43000000000", message = "Same",                                    timestamp = ago_ms(594) },
+    { source = "+43111000002", message = "Velocity was 42 points this sprint 🎉",   timestamp = ago_ms(60)  },
+    { source = "+43111000005", message = "Retro is at 15:00 tomorrow",              timestamp = ago_ms(15)  },
+  },
+  ["group-ghi"] = {  -- Climbing Crew
+    { source = "+43111000003", message = "Anyone up for bouldering Saturday?",      timestamp = ago_ms(2880) },
+    { source = "+43000000000", message = "I'm in!",                                 timestamp = ago_ms(2875) },
+    { source = "+43111000006", message = "Me too",                                  timestamp = ago_ms(2870) },
+    { source = "+43111000003", message = "New route opened at Kletterhalle",        timestamp = ago_ms(120)  },
+  },
 }
 
 function M.refresh()
