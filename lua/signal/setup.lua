@@ -127,8 +127,9 @@ local function open_windows()
   vim.wo[state.win].number         = false
   vim.wo[state.win].relativenumber = false
   vim.wo[state.win].signcolumn     = "no"
-  vim.wo[state.win].wrap           = true
+  vim.wo[state.win].wrap           = false
   vim.wo[state.win].cursorline     = false
+  vim.wo[state.win].foldenable     = false
 
   vim.keymap.set("n", "q",     close, { buffer = state.buf, nowait = true, silent = true })
   vim.keymap.set("n", "<Esc>", close, { buffer = state.buf, nowait = true, silent = true })
