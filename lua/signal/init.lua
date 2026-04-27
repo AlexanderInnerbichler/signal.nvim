@@ -121,7 +121,18 @@ local function render_list()
     table.insert(specs, { hl = "SignalDividerBar", line = lnum, col_s = #head + 2, col_e = -1 })
   end
 
-  local DOT = "●"   -- U+25CF, 3 bytes
+  local STRIPE = "▌"  -- U+258C, 3 bytes, 1 display col
+  local DOT    = "●"  -- U+25CF, 3 bytes, 1 display col
+  -- display widths: ▌=1 ●=1 space=1 icon≈4 → 7 total
+  local PREFIX_DISPLAY_W = 7
+
+  local function time_hl(timestr)
+    if not timestr or timestr == "" then return "SignalTime" end
+    if timestr:match("^%d%d?:%d%d") then return "SignalTimeHot"
+    elseif timestr:match("^Yesterday")  then return "SignalTimeWarm"
+    else return "SignalTime" end
+  end
+
   local function push_conv(c)
     local is_pinned  = state.pinned[c.id]
     local has_unread = c.unread and c.unread > 0
@@ -131,15 +142,13 @@ local function render_list()
     local badge      = has_unread and (" [" .. c.unread .. "]") or ""
     local timestr    = (c.time or "") .. badge
 
-    -- prefix is always same byte length: DOT + " " + icon
-    local prefix  = DOT .. " " .. icon
-    local gap     = math.max(1, win_width - #prefix - #name - #timestr - 2)
-    local line1   = prefix .. name .. string.rep(" ", gap) .. timestr
-    local line2   = "      " .. snippet:sub(1, win_width - 8)
+    local prefix = STRIPE .. DOT .. " " .. icon
+    local gap    = math.max(1, win_width - PREFIX_DISPLAY_W - #name - #timestr - 2)
+    local line1  = prefix .. name .. string.rep(" ", gap) .. timestr
+    local line2  = STRIPE .. "      " .. snippet:sub(1, win_width - 9)
 
     local name_lnum    = #lines
     local snippet_lnum = #lines + 1
-
     table.insert(lines, line1)
     table.insert(lines, line2)
     table.insert(lines, "")
@@ -147,30 +156,40 @@ local function render_list()
     state.line_conv_map[name_lnum + 1]    = c
     state.line_conv_map[snippet_lnum + 1] = c
 
-    -- unread dot: bright red when unread, near-invisible when read
+    local stripe_hl = is_pinned and "SignalStripePinned"
+      or c.kind == "group" and "SignalStripeGroup"
+      or "SignalStripeContact"
+
+    -- unread dot (sits between stripe and icon)
     local dot_hl = has_unread and "SignalUnread" or "SignalDividerBar"
-    table.insert(specs, { hl = dot_hl, line = name_lnum, col_s = 0, col_e = #DOT })
+    table.insert(specs, { hl = dot_hl,  line = name_lnum, col_s = #STRIPE, col_e = #STRIPE + #DOT })
 
-    -- icon colored per type
+    -- icon
     local icon_hl = c.kind == "group" and "SignalGroup" or "SignalName"
-    table.insert(specs, { hl = icon_hl, line = name_lnum, col_s = #DOT + 1, col_e = #DOT + 1 + #icon })
+    local icon_s  = #STRIPE + #DOT + 1
+    table.insert(specs, { hl = icon_hl, line = name_lnum, col_s = icon_s, col_e = icon_s + #icon })
 
-    -- name: gold for pinned, else type color
+    -- name
     local name_hl = is_pinned and "SignalPinned"
       or c.kind == "group" and "SignalGroup"
       or "SignalName"
     local name_s = #prefix
     table.insert(specs, { hl = name_hl, line = name_lnum, col_s = name_s, col_e = name_s + #name })
 
+    -- timestamp with recency color, then unread badge
     local time_s = #line1 - #timestr
     local time_e = time_s + #(c.time or "")
     if #(c.time or "") > 0 then
-      table.insert(specs, { hl = "SignalTime",   line = name_lnum, col_s = time_s, col_e = time_e })
+      table.insert(specs, { hl = time_hl(c.time), line = name_lnum, col_s = time_s, col_e = time_e })
     end
     if badge ~= "" then
       table.insert(specs, { hl = "SignalUnread", line = name_lnum, col_s = time_e, col_e = #line1 })
     end
-    table.insert(specs, { hl = "SignalSnippet", line = snippet_lnum, col_s = 0, col_e = -1 })
+
+    -- snippet first, then stripe overrides col 0 on both lines
+    table.insert(specs, { hl = "SignalSnippet", line = snippet_lnum, col_s = 0,       col_e = -1      })
+    table.insert(specs, { hl = stripe_hl,       line = snippet_lnum, col_s = 0,       col_e = #STRIPE })
+    table.insert(specs, { hl = stripe_hl,       line = name_lnum,    col_s = 0,       col_e = #STRIPE })
   end
 
   local visible = state.conversations
