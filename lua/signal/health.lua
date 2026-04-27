@@ -27,11 +27,11 @@ function M.check()
 
   -- phone_number
   if config.phone_number and config.phone_number ~= "" then
-    vim.health.ok("phone_number configured: " .. config.phone_number)
+    vim.health.ok("phone_number set")
   else
     vim.health.error(
-      "phone_number not set\n" ..
-      "Add: require('signal').setup({ phone_number = '+43...' })"
+      "SIGNAL_PHONE_NUMBER not set\n" ..
+      "Add to your shell profile: export SIGNAL_PHONE_NUMBER='+43...'"
     )
     return
   end

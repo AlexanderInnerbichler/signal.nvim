@@ -211,6 +211,11 @@ function M.close()
 end
 
 function M.open()
+  local ok, err = config.ready()
+  if not ok then
+    vim.notify("signal.nvim: " .. err, vim.log.levels.WARN)
+    return
+  end
   open_win()
   M.register_keymaps()
   M.fetch_and_render()

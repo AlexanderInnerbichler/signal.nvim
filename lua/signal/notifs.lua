@@ -119,6 +119,9 @@ function M.setup()
     state.timer = nil
   end
 
+  local ok = config.ready()
+  if not ok then return end
+
   local interval = config.get().poll_interval * 1000
   state.timer = vim.uv.new_timer()
   state.timer:start(interval, interval, vim.schedule_wrap(function()
