@@ -5,11 +5,12 @@ local config = require("signal.config")
 local ns = vim.api.nvim_create_namespace("Signal")
 
 local state = {
-  buf           = nil,
-  win           = nil,
-  conversations = {},
-  is_loading    = false,
-  account       = nil,
+  buf            = nil,
+  win            = nil,
+  conversations  = {},
+  is_loading     = false,
+  account        = nil,
+  line_conv_map  = {},
 }
 
 local FOOTER = " <CR> open  ·  r refresh  ·  q close "
@@ -46,47 +47,66 @@ local function render_list()
   end
 
   if #state.conversations == 0 then
-    write_buf({ "", "  No conversations found." }, {})
+    write_buf({
+      "",
+      "  No conversations yet.",
+      "",
+      "  Start a chat from your phone —",
+      "  it will appear here automatically.",
+    }, {
+      { hl = "SignalLoading", line = 1, col_s = 0, col_e = -1 },
+      { hl = "SignalLoading", line = 3, col_s = 0, col_e = -1 },
+      { hl = "SignalLoading", line = 4, col_s = 0, col_e = -1 },
+    })
     return
   end
 
-  local lines = { "" }
-  local specs = {}
+  local win_width   = vim.api.nvim_win_get_width(state.win)
+  local lines       = { "" }
+  local specs       = {}
+  state.line_conv_map = {}
 
   for i, c in ipairs(state.conversations) do
-    local lnum       = i
-    local name       = c.name or c.id or "Unknown"
-    local snippet    = c.snippet or ""
-    local time       = c.time or ""
-    local badge      = (c.unread and c.unread > 0) and ("[" .. c.unread .. "]") or ""
-    local icon       = c.kind == "group" and "  " or "  "
-    local name_width = 18
-    local snip_width = 30
+    local idx     = i - 1  -- 0-based
+    local icon    = c.kind == "group" and "  " or "  "
+    local name    = c.name or c.id or "Unknown"
+    local snippet = c.snippet or ""
+    local badge   = (c.unread and c.unread > 0) and (" [" .. c.unread .. "]") or ""
+    local timestr = (c.time or "") .. badge
 
-    local name_padded = name:sub(1, name_width)
-    name_padded = name_padded .. string.rep(" ", math.max(0, name_width - #name_padded))
-    local snip_padded = snippet:sub(1, snip_width)
-    snip_padded = snip_padded .. string.rep(" ", math.max(0, snip_width - #snip_padded))
+    local prefix  = "  " .. icon
+    local gap     = math.max(1, win_width - #prefix - #name - #timestr - 2)
+    local line1   = prefix .. name .. string.rep(" ", gap) .. timestr
+    local line2   = "    " .. snippet:sub(1, win_width - 6)
 
-    local line = icon .. name_padded .. "  " .. snip_padded .. "  " .. time
-    if badge ~= "" then line = line .. "  " .. badge end
-    table.insert(lines, line)
+    local name_lnum    = 1 + idx * 3  -- 0-indexed for highlights
+    local snippet_lnum = 2 + idx * 3
 
-    local icon_len   = #icon
-    local snip_start = icon_len + name_width + 2
-    local time_start = snip_start + #snip_padded + 2
+    table.insert(lines, line1)
+    table.insert(lines, line2)
+    table.insert(lines, "")
 
-    table.insert(specs, { hl = (c.kind == "group") and "SignalGroup" or "SignalName",
-      line = lnum, col_s = icon_len, col_e = icon_len + #name_padded })
-    table.insert(specs, { hl = "SignalSnippet",
-      line = lnum, col_s = snip_start, col_e = snip_start + #snip_padded })
-    table.insert(specs, { hl = "SignalTime",
-      line = lnum, col_s = time_start, col_e = time_start + #time })
-    if badge ~= "" then
-      local badge_start = time_start + #time + 2
-      table.insert(specs, { hl = "SignalUnread",
-        line = lnum, col_s = badge_start, col_e = badge_start + #badge })
+    -- 1-indexed cursor → conv (both name and snippet lines navigate)
+    state.line_conv_map[name_lnum + 1]    = c
+    state.line_conv_map[snippet_lnum + 1] = c
+
+    -- name highlight
+    local name_hl  = c.kind == "group" and "SignalGroup" or "SignalName"
+    local name_s   = #prefix
+    table.insert(specs, { hl = name_hl, line = name_lnum, col_s = name_s, col_e = name_s + #name })
+
+    -- time highlight
+    local time_s = #line1 - #timestr
+    local time_e = time_s + #(c.time or "")
+    if #(c.time or "") > 0 then
+      table.insert(specs, { hl = "SignalTime", line = name_lnum, col_s = time_s, col_e = time_e })
     end
+    if badge ~= "" then
+      table.insert(specs, { hl = "SignalUnread", line = name_lnum, col_s = time_e, col_e = #line1 })
+    end
+
+    -- snippet highlight
+    table.insert(specs, { hl = "SignalSnippet", line = snippet_lnum, col_s = 0, col_e = -1 })
   end
 
   write_buf(lines, specs)
@@ -102,7 +122,7 @@ function M.register_keymaps()
   bmap("<CR>",  function()
     if not is_valid() then return end
     local cur  = vim.api.nvim_win_get_cursor(state.win)[1]
-    local conv = state.conversations[cur - 1]
+    local conv = state.line_conv_map[cur]
     if conv then
       require("signal.notifs").clear_unread(conv.id)
       conv.unread = 0
@@ -112,11 +132,11 @@ function M.register_keymaps()
 end
 
 local DEBUG_CONVS = {
-  { id = "+43111000001", name = "Alice",        kind = "contact", snippet = "Hey, how are you?",   time = "12:34", unread = 2 },
-  { id = "+43111000002", name = "Bob",          kind = "contact", snippet = "See you tomorrow!",   time = "09:11", unread = 0 },
-  { id = "+43111000003", name = "Charlie",      kind = "contact", snippet = "",                    time = "Mon",   unread = 0 },
-  { id = "group-abc",   name = "Family Group",  kind = "group",   snippet = "Dinner on Sunday?",   time = "Tue",   unread = 1 },
-  { id = "group-xyz",   name = "Work Team",     kind = "group",   snippet = "PR merged ✓",         time = "Wed",   unread = 0 },
+  { id = "+43111000001", name = "Alice",        kind = "contact", snippet = "Hey, how are you?",          time = "12:34", unread = 2 },
+  { id = "+43111000002", name = "Bob",          kind = "contact", snippet = "See you tomorrow!",           time = "09:11", unread = 0 },
+  { id = "+43111000003", name = "Charlie",      kind = "contact", snippet = "",                            time = "Mon",   unread = 0 },
+  { id = "group-abc",   name = "Family Group",  kind = "group",   snippet = "Dinner on Sunday?",           time = "Tue",   unread = 1 },
+  { id = "group-xyz",   name = "Work Team",     kind = "group",   snippet = "PR merged — deploying now",   time = "Wed",   unread = 0 },
 }
 
 function M.fetch_and_render()
