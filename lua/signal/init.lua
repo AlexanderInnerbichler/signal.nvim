@@ -123,29 +123,38 @@ local function render_list()
 
   local STRIPE = "▌"  -- U+258C, 3 bytes, 1 display col
   local DOT    = "●"  -- U+25CF, 3 bytes, 1 display col
-  -- display widths: ▌=1 ●=1 space=1 icon≈4 → 7 total
-  local PREFIX_DISPLAY_W = 7
+  -- display widths: ▌=1 ●=1 sp=1 inits=2 sp=1 → 6 total
+  local PREFIX_DISPLAY_W = 6
 
   local function time_hl(timestr)
     if not timestr or timestr == "" then return "SignalTime" end
-    if timestr:match("^%d%d?:%d%d") then return "SignalTimeHot"
-    elseif timestr:match("^Yesterday")  then return "SignalTimeWarm"
+    if timestr:match("^%d%d?:%d%d")  then return "SignalTimeHot"
+    elseif timestr:match("^Yesterday") then return "SignalTimeWarm"
     else return "SignalTime" end
+  end
+
+  local function initials(name)
+    local words = {}
+    for w in (name or ""):gmatch("%S+") do table.insert(words, w) end
+    if #words >= 2 then
+      return (words[1]:sub(1,1) .. words[2]:sub(1,1)):upper()
+    end
+    return name:sub(1, 2):upper()
   end
 
   local function push_conv(c)
     local is_pinned  = state.pinned[c.id]
     local has_unread = c.unread and c.unread > 0
-    local icon       = c.kind == "group" and "  " or "  "
     local name       = c.name or c.id or "Unknown"
+    local inits      = initials(name)
     local snippet    = c.snippet or ""
     local badge      = has_unread and (" [" .. c.unread .. "]") or ""
     local timestr    = (c.time or "") .. badge
 
-    local prefix = STRIPE .. DOT .. " " .. icon
+    local prefix = STRIPE .. DOT .. " " .. inits .. " "
     local gap    = math.max(1, win_width - PREFIX_DISPLAY_W - #name - #timestr - 2)
     local line1  = prefix .. name .. string.rep(" ", gap) .. timestr
-    local line2  = STRIPE .. "      " .. snippet:sub(1, win_width - 9)
+    local line2  = STRIPE .. "     " .. snippet:sub(1, win_width - 8)
 
     local name_lnum    = #lines
     local snippet_lnum = #lines + 1
@@ -160,14 +169,14 @@ local function render_list()
       or c.kind == "group" and "SignalStripeGroup"
       or "SignalStripeContact"
 
-    -- unread dot (sits between stripe and icon)
+    -- unread dot
     local dot_hl = has_unread and "SignalUnread" or "SignalDividerBar"
-    table.insert(specs, { hl = dot_hl,  line = name_lnum, col_s = #STRIPE, col_e = #STRIPE + #DOT })
+    table.insert(specs, { hl = dot_hl, line = name_lnum, col_s = #STRIPE, col_e = #STRIPE + #DOT })
 
-    -- icon
-    local icon_hl = c.kind == "group" and "SignalGroup" or "SignalName"
-    local icon_s  = #STRIPE + #DOT + 1
-    table.insert(specs, { hl = icon_hl, line = name_lnum, col_s = icon_s, col_e = icon_s + #icon })
+    -- initials in type color
+    local inits_hl = c.kind == "group" and "SignalGroup" or "SignalName"
+    local inits_s  = #STRIPE + #DOT + 1
+    table.insert(specs, { hl = inits_hl, line = name_lnum, col_s = inits_s, col_e = inits_s + #inits })
 
     -- name
     local name_hl = is_pinned and "SignalPinned"
@@ -186,10 +195,10 @@ local function render_list()
       table.insert(specs, { hl = "SignalUnread", line = name_lnum, col_s = time_e, col_e = #line1 })
     end
 
-    -- snippet first, then stripe overrides col 0 on both lines
-    table.insert(specs, { hl = "SignalSnippet", line = snippet_lnum, col_s = 0,       col_e = -1      })
-    table.insert(specs, { hl = stripe_hl,       line = snippet_lnum, col_s = 0,       col_e = #STRIPE })
-    table.insert(specs, { hl = stripe_hl,       line = name_lnum,    col_s = 0,       col_e = #STRIPE })
+    -- snippet first, stripe overrides col 0 on both lines
+    table.insert(specs, { hl = "SignalSnippet", line = snippet_lnum, col_s = 0, col_e = -1      })
+    table.insert(specs, { hl = stripe_hl,       line = snippet_lnum, col_s = 0, col_e = #STRIPE })
+    table.insert(specs, { hl = stripe_hl,       line = name_lnum,    col_s = 0, col_e = #STRIPE })
   end
 
   local visible = state.conversations
