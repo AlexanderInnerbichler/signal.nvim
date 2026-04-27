@@ -9,13 +9,14 @@ local H = 22
 local SEP = "  " .. string.rep("─", W - 6)
 
 local state = {
-  buf        = nil,
-  win        = nil,
-  log        = {},   -- list of {kind, text}
-  step       = nil,  -- "phone" | "captcha" | "sms" | "done" | "error"
-  number     = nil,
-  in_input   = false,
-  input_line = nil,  -- 1-indexed buffer line where user types
+  buf          = nil,
+  win          = nil,
+  log          = {},   -- list of {kind, text}
+  step         = nil,  -- "phone" | "captcha" | "sms" | "done" | "error"
+  number       = nil,
+  in_input     = false,
+  input_line   = nil,  -- 1-indexed buffer line where user types
+  input_augroup = nil,
 }
 
 -- ── log kinds ────────────────────────────────────────────────────────────────
@@ -111,6 +112,10 @@ end
 
 local function on_submit()
   vim.cmd("stopinsert")
+  if state.input_augroup then
+    pcall(vim.api.nvim_del_augroup_by_id, state.input_augroup)
+    state.input_augroup = nil
+  end
   if not state.buf or not vim.api.nvim_buf_is_valid(state.buf) then return end
 
   local lnum  = state.input_line
@@ -153,8 +158,24 @@ local function show_input(prompt)
     vim.keymap.set("i", lhs, rhs, { buffer = state.buf, nowait = true, silent = true })
   end
   imap("<C-s>", on_submit)
+  imap("<CR>",  on_submit)
   imap("<Up>",  "<Nop>")
-  imap("<C-u>", "<Nop>")  -- prevent clearing whole line history
+  imap("<Down>", "<Nop>")
+  imap("<C-u>", "<Nop>")
+
+  local ag = vim.api.nvim_create_augroup("SignalInputGuard", { clear = true })
+  state.input_augroup = ag
+  vim.api.nvim_create_autocmd("InsertCharPre", {
+    group    = ag,
+    buffer   = state.buf,
+    callback = function()
+      if state.win and vim.api.nvim_win_is_valid(state.win) then
+        if vim.api.nvim_win_get_cursor(state.win)[1] ~= state.input_line then
+          vim.v.char = ""
+        end
+      end
+    end,
+  })
 end
 
 -- ── window ────────────────────────────────────────────────────────────────────
@@ -212,8 +233,20 @@ end
 -- ── step handlers ─────────────────────────────────────────────────────────────
 
 local function do_register(number, captcha_token)
+  if config.get().debug then
+    log("cmd", "[debug] register " .. number .. (captcha_token and " --captcha …" or ""))
+    vim.defer_fn(function()
+      log("ok", "[debug] SMS sent to " .. number .. ".")
+      log("blank", "")
+      state.step = "sms"
+      set_footer("sms")
+      show_input("Verification code")
+    end, 800)
+    return
+  end
+
   local cmd  = config.get().signal_cmd
-  local args = { cmd, "-u", number, "register" }
+  local args = { cmd, "-a", number, "register", "--reregister" }
   if captcha_token then
     vim.list_extend(args, { "--captcha", captcha_token })
   end
@@ -235,14 +268,39 @@ local function do_register(number, captcha_token)
         local url = stderr:match("(https://[^%s]+)")
         log("err", "Captcha required by Signal.")
         if url then
+          pcall(vim.ui.open, url)
           log("url",  url)
-          log("info", "Open the URL in your browser, solve it,")
-          log("info", "then copy the token and paste it below.")
+          log("info", "Captcha opened in browser. Solve it,")
+          log("info", "copy the token and paste it below.")
         end
         log("blank", "")
         state.step = "captcha"
         set_footer("captcha")
         show_input("Captcha token")
+        return
+      end
+
+      if stderr:find("409") then
+        log("info", "Registration already initiated (409).")
+        log("info", "Check your SMS for a code sent earlier.")
+        log("blank", "")
+        state.step = "sms"
+        set_footer("sms")
+        show_input("Verification code")
+        return
+      end
+
+      if stderr:find("StatusCode: 499") or stderr:lower():find("deprecated") then
+        log("err",  "signal-cli version is outdated (499).")
+        log("info", "Upgrade signal-cli and run :SignalSetup again.")
+        state.step = "error"
+        set_footer("error")
+        return
+      end
+
+      if stderr:find("429") or stderr:lower():find("rate") then
+        log("info", "Rate limited (429). Retrying in 30 s…")
+        vim.defer_fn(function() do_register(number, captcha_token) end, 30000)
         return
       end
 
@@ -283,8 +341,18 @@ function M.handle_sms(code)
     show_input("Verification code")
     return
   end
+  if config.get().debug then
+    log("cmd", "[debug] verify " .. code)
+    vim.defer_fn(function()
+      log("ok",   "[debug] Registered successfully!")
+      log("info", "You can now close this window and use :Signal")
+      state.step = "done"
+      set_footer("done")
+    end, 800)
+    return
+  end
   local cmd  = config.get().signal_cmd
-  local args = { cmd, "-u", state.number, "verify", code }
+  local args = { cmd, "-a", state.number, "verify", code }
   log("cmd", table.concat(args, " "))
 
   vim.system(args, { text = true }, function(result)
@@ -296,8 +364,18 @@ function M.handle_sms(code)
         set_footer("done")
       else
         local stderr = result.stderr or ""
-        log("err",  stderr ~= "" and stderr or "Verification failed.")
-        log("info", "Run :SignalSetup to try again.")
+        if stderr:find("429") or stderr:lower():find("rate") then
+          log("info", "Rate limited (429). Retrying in 30 s…")
+          vim.defer_fn(function() M.handle_sms(code) end, 30000)
+          return
+        end
+        if stderr:find("StatusCode: 499") or stderr:lower():find("deprecated") then
+          log("err",  "signal-cli version is outdated (499).")
+          log("info", "Upgrade signal-cli and run :SignalSetup again.")
+        else
+          log("err",  stderr ~= "" and stderr or "Verification failed.")
+          log("info", "Run :SignalSetup to try again.")
+        end
         state.step = "error"
         set_footer("error")
       end

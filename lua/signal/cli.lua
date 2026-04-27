@@ -37,7 +37,7 @@ function M.run(args, callback)
 end
 
 local function base_args(number)
-  return { config.get().signal_cmd, "-u", number, "--output=json" }
+  return { config.get().signal_cmd, "-a", number, "--output=json" }
 end
 
 function M.receive(number, callback)
@@ -54,7 +54,7 @@ function M.list_groups(number, callback)
 end
 
 function M.send(number, recipient, body, is_group, callback)
-  local args = { config.get().signal_cmd, "-u", number, "send", "-m", body }
+  local args = { config.get().signal_cmd, "-a", number, "send", "-m", body }
   vim.list_extend(args, is_group and { "-g", recipient } or { "-n", recipient })
   M.run(args, callback)
 end

@@ -5,6 +5,7 @@ local defaults = {
   notif_ttl     = 5,
   window_width  = 0.9,
   signal_cmd    = "signal-cli",
+  debug         = false,
 }
 
 local _config = vim.deepcopy(defaults)
