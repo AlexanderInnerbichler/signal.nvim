@@ -103,89 +103,64 @@ local function render_list()
   state.line_conv_map = {}
 
   local function push_divider(label)
-    local hl   = label == "Pinned" and "SignalPinned"
-      or         label == "Groups" and "SignalGroup"
-      or         "SignalName"
-    local dot  = "●"
-    local head = "  " .. dot .. "  " .. label
-    local bar  = string.rep("─", math.max(2, win_width - #head - 3))
-    local line = head .. "  " .. bar
-    local lnum = #lines
+    local available = win_width - #label - 8
+    local bar_l     = string.rep("─", math.max(2, math.floor(available / 2)))
+    local bar_r     = string.rep("─", math.max(2, available - math.floor(available / 2)))
+    local line      = "  " .. bar_l .. "  " .. label .. "  " .. bar_r
+    local lnum      = #lines
+    local label_s   = 2 + #bar_l + 2
+    local label_e   = label_s + #label
 
     table.insert(lines, line)
     table.insert(lines, "")
 
-    -- dot colored per section, label same color, trailing bar very dim
-    table.insert(specs, { hl = hl,                line = lnum, col_s = 2, col_e = 2 + #dot })
-    table.insert(specs, { hl = hl,                line = lnum, col_s = 2 + #dot + 2, col_e = #head })
-    table.insert(specs, { hl = "SignalDividerBar", line = lnum, col_s = #head + 2, col_e = -1 })
+    table.insert(specs, { hl = "SignalDividerBar",   line = lnum, col_s = 0,       col_e = label_s })
+    table.insert(specs, { hl = "SignalSectionLabel", line = lnum, col_s = label_s, col_e = label_e })
+    table.insert(specs, { hl = "SignalDividerBar",   line = lnum, col_s = label_e, col_e = -1      })
   end
-
-  local STRIPE = "▌"  -- U+258C, 3 bytes, 1 display col
-  local DOT    = "●"  -- U+25CF, 3 bytes, 1 display col
-  -- display widths: ▌=1 ●=1 sp=1 inits=2 sp=1 → 6 total
-  local PREFIX_DISPLAY_W = 6
 
   local function time_hl(timestr)
     if not timestr or timestr == "" then return "SignalTime" end
-    if timestr:match("^%d%d?:%d%d")  then return "SignalTimeHot"
+    if timestr:match("^%d%d?:%d%d")   then return "SignalTimeHot"
     elseif timestr:match("^Yesterday") then return "SignalTimeWarm"
     else return "SignalTime" end
-  end
-
-  local function initials(name)
-    local words = {}
-    for w in (name or ""):gmatch("%S+") do table.insert(words, w) end
-    if #words >= 2 then
-      return (words[1]:sub(1,1) .. words[2]:sub(1,1)):upper()
-    end
-    return name:sub(1, 2):upper()
   end
 
   local function push_conv(c)
     local is_pinned  = state.pinned[c.id]
     local has_unread = c.unread and c.unread > 0
+    local icon       = c.kind == "group" and "  " or "  "
     local name       = c.name or c.id or "Unknown"
-    local inits      = initials(name)
     local snippet    = c.snippet or ""
     local badge      = has_unread and (" [" .. c.unread .. "]") or ""
     local timestr    = (c.time or "") .. badge
 
-    local prefix = STRIPE .. DOT .. " " .. inits .. " "
-    local gap    = math.max(1, win_width - PREFIX_DISPLAY_W - #name - #timestr - 2)
+    -- prefix: 2 spaces + icon (3-byte nerd font + 2 spaces) = 7 bytes, ~6 display cols
+    local prefix = "  " .. icon
+    local gap    = math.max(1, win_width - 6 - #name - #timestr - 2)
     local line1  = prefix .. name .. string.rep(" ", gap) .. timestr
-    local line2  = STRIPE .. "     " .. snippet:sub(1, win_width - 8)
+    local line2  = "      " .. snippet:sub(1, win_width - 8)
 
     local name_lnum    = #lines
     local snippet_lnum = #lines + 1
     table.insert(lines, line1)
     table.insert(lines, line2)
-    table.insert(lines, "")
 
     state.line_conv_map[name_lnum + 1]    = c
     state.line_conv_map[snippet_lnum + 1] = c
 
-    local stripe_hl = is_pinned and "SignalStripePinned"
-      or c.kind == "group" and "SignalStripeGroup"
-      or "SignalStripeContact"
+    -- icon: always dim, type-specific
+    local icon_hl = c.kind == "group" and "SignalGroupDim" or "SignalNameDim"
+    table.insert(specs, { hl = icon_hl, line = name_lnum, col_s = 2, col_e = 2 + #icon })
 
-    -- unread dot
-    local dot_hl = has_unread and "SignalUnread" or "SignalDividerBar"
-    table.insert(specs, { hl = dot_hl, line = name_lnum, col_s = #STRIPE, col_e = #STRIPE + #DOT })
-
-    -- initials in type color
-    local inits_hl = c.kind == "group" and "SignalGroup" or "SignalName"
-    local inits_s  = #STRIPE + #DOT + 1
-    table.insert(specs, { hl = inits_hl, line = name_lnum, col_s = inits_s, col_e = inits_s + #inits })
-
-    -- name
+    -- name: bright when unread, dim when read
     local name_hl = is_pinned and "SignalPinned"
-      or c.kind == "group" and "SignalGroup"
-      or "SignalName"
+      or (has_unread and (c.kind == "group" and "SignalGroup" or "SignalName"))
+      or (c.kind == "group" and "SignalGroupDim" or "SignalNameDim")
     local name_s = #prefix
     table.insert(specs, { hl = name_hl, line = name_lnum, col_s = name_s, col_e = name_s + #name })
 
-    -- timestamp with recency color, then unread badge
+    -- timestamp (recency-tinted) + badge
     local time_s = #line1 - #timestr
     local time_e = time_s + #(c.time or "")
     if #(c.time or "") > 0 then
@@ -194,11 +169,7 @@ local function render_list()
     if badge ~= "" then
       table.insert(specs, { hl = "SignalUnread", line = name_lnum, col_s = time_e, col_e = #line1 })
     end
-
-    -- snippet first, stripe overrides col 0 on both lines
-    table.insert(specs, { hl = "SignalSnippet", line = snippet_lnum, col_s = 0, col_e = -1      })
-    table.insert(specs, { hl = stripe_hl,       line = snippet_lnum, col_s = 0, col_e = #STRIPE })
-    table.insert(specs, { hl = stripe_hl,       line = name_lnum,    col_s = 0, col_e = #STRIPE })
+    table.insert(specs, { hl = "SignalSnippet", line = snippet_lnum, col_s = 0, col_e = -1 })
   end
 
   local visible = state.conversations
@@ -279,7 +250,7 @@ function M.show_profile(conv)
     vim.api.nvim_buf_set_lines(pbuf, 0, -1, false, lns)
     vim.bo[pbuf].modifiable = false
     vim.api.nvim_buf_clear_namespace(pbuf, ns_p, 0, -1)
-    vim.api.nvim_buf_add_highlight(pbuf, ns_p, "SignalName", 1, 5, -1)
+    vim.api.nvim_buf_add_highlight(pbuf, ns_p, "SignalName", 1, 2, -1)
     vim.api.nvim_buf_add_highlight(pbuf, ns_p, "SignalTime", 2, 0, -1)
   end
 
