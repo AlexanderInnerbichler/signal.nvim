@@ -265,6 +265,11 @@ local function register_keymaps()
   end)
   bmap("s",    function() open_input() end)
   bmap("r",    M.refresh)
+  bmap("p",    function()
+    if state.conversation then
+      require("signal").show_profile(state.conversation)
+    end
+  end)
   bmap("gr",   function()
     if not (state.win and vim.api.nvim_win_is_valid(state.win)) then return end
     local cur = vim.api.nvim_win_get_cursor(state.win)[1]
