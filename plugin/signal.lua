@@ -4,3 +4,7 @@ vim.g.signal_loaded = true
 vim.api.nvim_create_user_command("Signal", function()
   require("signal").toggle()
 end, { desc = "Toggle Signal messenger" })
+
+vim.api.nvim_create_user_command("SignalSetup", function()
+  require("signal.setup").run()
+end, { desc = "Register a Signal account" })

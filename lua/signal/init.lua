@@ -9,6 +9,7 @@ local state = {
   win           = nil,
   conversations = {},
   is_loading    = false,
+  account       = nil,
 }
 
 local FOOTER = " <CR> open  ·  r refresh  ·  q close "
@@ -53,14 +54,14 @@ local function render_list()
   local specs = {}
 
   for i, c in ipairs(state.conversations) do
-    local lnum        = i
-    local name        = c.name or c.id or "Unknown"
-    local snippet     = c.snippet or ""
-    local time        = c.time or ""
-    local badge       = (c.unread and c.unread > 0) and ("[" .. c.unread .. "]") or ""
-    local icon        = c.kind == "group" and "  " or "  "
-    local name_width  = 18
-    local snip_width  = 30
+    local lnum       = i
+    local name       = c.name or c.id or "Unknown"
+    local snippet    = c.snippet or ""
+    local time       = c.time or ""
+    local badge      = (c.unread and c.unread > 0) and ("[" .. c.unread .. "]") or ""
+    local icon       = c.kind == "group" and "  " or "  "
+    local name_width = 18
+    local snip_width = 30
 
     local name_padded = name:sub(1, name_width)
     name_padded = name_padded .. string.rep(" ", math.max(0, name_width - #name_padded))
@@ -105,7 +106,7 @@ function M.register_keymaps()
     if conv then
       require("signal.notifs").clear_unread(conv.id)
       conv.unread = 0
-      require("signal.thread").open(conv, state.buf, state.win)
+      require("signal.thread").open(conv, state.account, state.buf, state.win)
     end
   end)
 end
@@ -146,13 +147,13 @@ function M.fetch_and_render()
     render_list()
   end
 
-  cli.list_contacts(function(err, data)
+  cli.list_contacts(state.account, function(err, data)
     contacts_data = (err or type(data) ~= "table") and {} or data
     contacts_done = true
     try_finish()
   end)
 
-  cli.list_groups(function(err, data)
+  cli.list_groups(state.account, function(err, data)
     groups_data = (err or type(data) ~= "table") and {} or data
     groups_done = true
     try_finish()
@@ -216,9 +217,16 @@ function M.open()
     vim.notify("signal.nvim: " .. err, vim.log.levels.WARN)
     return
   end
-  open_win()
-  M.register_keymaps()
-  M.fetch_and_render()
+  config.resolve_account(function(number)
+    if not number then
+      vim.notify("signal.nvim: no account registered — run :SignalSetup", vim.log.levels.WARN)
+      return
+    end
+    state.account = number
+    open_win()
+    M.register_keymaps()
+    M.fetch_and_render()
+  end)
 end
 
 function M.toggle()

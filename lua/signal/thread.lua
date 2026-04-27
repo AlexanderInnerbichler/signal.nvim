@@ -1,11 +1,11 @@
-local M      = {}
-local cli    = require("signal.cli")
-local config = require("signal.config")
+local M   = {}
+local cli = require("signal.cli")
 
 local ns = vim.api.nvim_create_namespace("SignalThread")
 
 local state = {
   conversation = nil,
+  account      = nil,
   messages     = {},
   buf          = nil,
   win          = nil,
@@ -58,7 +58,7 @@ local function render()
   local phone = config.get().phone_number
 
   for _, msg in ipairs(state.messages) do
-    local is_self  = msg.source == phone
+    local is_self  = msg.source == state.account
     local sender   = is_self and "You" or (conv and conv.name or msg.source or "?")
     local time_str = ts_to_hhmm(msg.timestamp)
     local body     = msg.message or ""
@@ -135,7 +135,7 @@ local function open_input()
     if state.win and vim.api.nvim_win_is_valid(state.win) then
       vim.api.nvim_set_current_win(state.win)
     end
-    cli.send(conv.id, body, conv.kind == "group", function(err)
+    cli.send(state.account, conv.id, body, conv.kind == "group", function(err)
       if err then
         vim.notify("signal.nvim: send failed: " .. err, vim.log.levels.ERROR)
       else
@@ -181,7 +181,7 @@ end
 function M.refresh()
   state.is_loading = true
   render()
-  cli.receive(function(err, data)
+  cli.receive(state.account, function(err, data)
     if err then
       vim.notify("signal.nvim: receive error: " .. err, vim.log.levels.WARN)
       state.is_loading = false
@@ -211,8 +211,9 @@ function M.refresh()
   end)
 end
 
-function M.open(conversation, buf, win)
+function M.open(conversation, account, buf, win)
   state.conversation = conversation
+  state.account      = account
   state.buf          = buf
   state.win          = win
   state.messages     = {}

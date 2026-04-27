@@ -20,11 +20,7 @@ local function dispatch(args, callback)
       end
       if result.stdout and result.stdout ~= "" then
         local ok, decoded = pcall(vim.fn.json_decode, result.stdout)
-        if ok then
-          callback(nil, decoded)
-        else
-          callback(nil, result.stdout)
-        end
+        callback(nil, ok and decoded or result.stdout)
       else
         callback(nil, nil)
       end
@@ -40,34 +36,26 @@ function M.run(args, callback)
   end
 end
 
-function M.base_args()
-  local cfg = config.get()
-  return { cfg.signal_cmd, "-u", cfg.phone_number, "--output=json" }
+local function base_args(number)
+  return { config.get().signal_cmd, "-u", number, "--output=json" }
 end
 
-function M.receive(callback)
-  local args = vim.list_extend(vim.list_slice(M.base_args()), { "receive", "--ignore-attachments" })
+function M.receive(number, callback)
+  local args = vim.list_extend(base_args(number), { "receive", "--ignore-attachments" })
   M.run(args, callback)
 end
 
-function M.list_contacts(callback)
-  local args = vim.list_extend(vim.list_slice(M.base_args()), { "listContacts" })
-  M.run(args, callback)
+function M.list_contacts(number, callback)
+  M.run(vim.list_extend(base_args(number), { "listContacts" }), callback)
 end
 
-function M.list_groups(callback)
-  local args = vim.list_extend(vim.list_slice(M.base_args()), { "listGroups" })
-  M.run(args, callback)
+function M.list_groups(number, callback)
+  M.run(vim.list_extend(base_args(number), { "listGroups" }), callback)
 end
 
-function M.send(recipient, body, is_group, callback)
-  local cfg  = config.get()
-  local args = { cfg.signal_cmd, "-u", cfg.phone_number, "send", "-m", body }
-  if is_group then
-    vim.list_extend(args, { "-g", recipient })
-  else
-    vim.list_extend(args, { "-n", recipient })
-  end
+function M.send(number, recipient, body, is_group, callback)
+  local args = { config.get().signal_cmd, "-u", number, "send", "-m", body }
+  vim.list_extend(args, is_group and { "-g", recipient } or { "-n", recipient })
   M.run(args, callback)
 end
 
