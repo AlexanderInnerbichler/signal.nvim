@@ -76,6 +76,7 @@ local function render()
     local sender   = is_self and "You" or (conv and conv.name or msg.source or "?")
     local time_str = format_ts(msg.timestamp)
     local body     = msg.message or ""
+    local attach   = msg.attachments and "📎 " or ""
 
     local header_ln = #lines
     table.insert(lines, "  " .. sender .. "  " .. time_str)
@@ -88,9 +89,11 @@ local function render()
       line = header_ln, col_s = 2 + #sender + 2, col_e = -1,
     })
 
-    for _, bline in ipairs(vim.split(body, "\n", { plain = true })) do
+    local body_lines = vim.split(body, "\n", { plain = true })
+    for bi, bline in ipairs(body_lines) do
       local body_ln = #lines
-      table.insert(lines, "    " .. bline)
+      local prefix  = bi == 1 and ("    " .. attach) or "    "
+      table.insert(lines, prefix .. bline)
       table.insert(specs, { hl = "SignalMsgBody", line = body_ln, col_s = 4, col_e = -1 })
     end
     table.insert(lines, "")
@@ -208,7 +211,7 @@ local DEBUG_THREADS = {
   ["+43111000001"] = {  -- Alice
     { source = "+43111000001", message = "Hey! Are you free this weekend?",       timestamp = ago_ms(120) },
     { source = "+43000000000", message = "Yeah, what did you have in mind?",       timestamp = ago_ms(118) },
-    { source = "+43111000001", message = "Maybe hiking? The weather looks great.", timestamp = ago_ms(115) },
+    { source = "+43111000001", message = "Maybe hiking? The weather looks great.", timestamp = ago_ms(115), attachments = true },
     { source = "+43000000000", message = "I'm in! Saturday or Sunday?",            timestamp = ago_ms(110) },
     { source = "+43111000001", message = "Saturday works. Let's say 10am?",        timestamp = ago_ms(90)  },
     { source = "+43000000000", message = "Perfect, see you then!",                 timestamp = ago_ms(88)  },
@@ -240,8 +243,15 @@ local DEBUG_THREADS = {
 function M.refresh()
   if config.get().debug then
     local conv_id = state.conversation and state.conversation.id
-    state.messages   = DEBUG_THREADS[conv_id] or {}
+    local msgs = DEBUG_THREADS[conv_id] or {}
+    state.messages   = msgs
     state.is_loading = false
+    -- update snippet in conversation list
+    if state.conversation and #msgs > 0 then
+      local last = msgs[#msgs]
+      local icon = last.attachments and "📎 " or ""
+      state.conversation.snippet = icon .. (last.message or "")
+    end
     render()
     return
   end
