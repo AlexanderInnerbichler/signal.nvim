@@ -72,10 +72,63 @@ local function render_list()
     return
   end
 
-  local win_width   = vim.api.nvim_win_get_width(state.win)
-  local lines       = { "" }
-  local specs       = {}
+  local win_width     = vim.api.nvim_win_get_width(state.win)
+  local lines         = { "" }
+  local specs         = {}
   state.line_conv_map = {}
+
+  -- account header
+  local acct = state.account or ""
+  table.insert(lines, "  " .. acct)
+  table.insert(specs, { hl = "SignalTime", line = 1, col_s = 0, col_e = -1 })
+  table.insert(lines, "  " .. string.rep("─", win_width - 4))
+  table.insert(specs, { hl = "SignalTime", line = 2, col_s = 0, col_e = -1 })
+  table.insert(lines, "")
+
+  local function push_divider(label)
+    local pad  = win_width - #label - 8
+    local bar  = string.rep("─", math.max(2, math.floor(pad / 2)))
+    local line = "  " .. bar .. "  " .. label .. "  " .. bar
+    local lnum = #lines  -- 0-indexed
+    table.insert(lines, line)
+    table.insert(specs, { hl = "SignalTime", line = lnum, col_s = 0, col_e = -1 })
+    table.insert(lines, "")
+  end
+
+  local function push_conv(c)
+    local icon    = c.kind == "group" and "  " or "  "
+    local name    = c.name or c.id or "Unknown"
+    local snippet = c.snippet or ""
+    local badge   = (c.unread and c.unread > 0) and (" [" .. c.unread .. "]") or ""
+    local timestr = (c.time or "") .. badge
+    local prefix  = "  " .. icon
+    local gap     = math.max(1, win_width - #prefix - #name - #timestr - 2)
+    local line1   = prefix .. name .. string.rep(" ", gap) .. timestr
+    local line2   = "    " .. snippet:sub(1, win_width - 6)
+
+    local name_lnum    = #lines      -- 0-indexed
+    local snippet_lnum = #lines + 1
+
+    table.insert(lines, line1)
+    table.insert(lines, line2)
+    table.insert(lines, "")
+
+    state.line_conv_map[name_lnum + 1]    = c
+    state.line_conv_map[snippet_lnum + 1] = c
+
+    local name_hl = c.kind == "group" and "SignalGroup" or "SignalName"
+    local name_s  = #prefix
+    table.insert(specs, { hl = name_hl,      line = name_lnum, col_s = name_s, col_e = name_s + #name })
+    local time_s  = #line1 - #timestr
+    local time_e  = time_s + #(c.time or "")
+    if #(c.time or "") > 0 then
+      table.insert(specs, { hl = "SignalTime",   line = name_lnum, col_s = time_s, col_e = time_e })
+    end
+    if badge ~= "" then
+      table.insert(specs, { hl = "SignalUnread", line = name_lnum, col_s = time_e, col_e = #line1 })
+    end
+    table.insert(specs, { hl = "SignalSnippet", line = snippet_lnum, col_s = 0, col_e = -1 })
+  end
 
   local visible = state.conversations
   if state.filter ~= "" then
@@ -85,47 +138,16 @@ local function render_list()
     end, visible)
   end
 
-  for i, c in ipairs(visible) do
-    local idx     = i - 1  -- 0-based
-    local icon    = c.kind == "group" and "  " or "  "
-    local name    = c.name or c.id or "Unknown"
-    local snippet = c.snippet or ""
-    local badge   = (c.unread and c.unread > 0) and (" [" .. c.unread .. "]") or ""
-    local timestr = (c.time or "") .. badge
+  local contacts = vim.tbl_filter(function(c) return c.kind ~= "group" end, visible)
+  local groups   = vim.tbl_filter(function(c) return c.kind == "group"  end, visible)
 
-    local prefix  = "  " .. icon
-    local gap     = math.max(1, win_width - #prefix - #name - #timestr - 2)
-    local line1   = prefix .. name .. string.rep(" ", gap) .. timestr
-    local line2   = "    " .. snippet:sub(1, win_width - 6)
-
-    local name_lnum    = 1 + idx * 3  -- 0-indexed for highlights
-    local snippet_lnum = 2 + idx * 3
-
-    table.insert(lines, line1)
-    table.insert(lines, line2)
-    table.insert(lines, "")
-
-    -- 1-indexed cursor → conv (both name and snippet lines navigate)
-    state.line_conv_map[name_lnum + 1]    = c
-    state.line_conv_map[snippet_lnum + 1] = c
-
-    -- name highlight
-    local name_hl  = c.kind == "group" and "SignalGroup" or "SignalName"
-    local name_s   = #prefix
-    table.insert(specs, { hl = name_hl, line = name_lnum, col_s = name_s, col_e = name_s + #name })
-
-    -- time highlight
-    local time_s = #line1 - #timestr
-    local time_e = time_s + #(c.time or "")
-    if #(c.time or "") > 0 then
-      table.insert(specs, { hl = "SignalTime", line = name_lnum, col_s = time_s, col_e = time_e })
-    end
-    if badge ~= "" then
-      table.insert(specs, { hl = "SignalUnread", line = name_lnum, col_s = time_e, col_e = #line1 })
-    end
-
-    -- snippet highlight
-    table.insert(specs, { hl = "SignalSnippet", line = snippet_lnum, col_s = 0, col_e = -1 })
+  if #contacts > 0 then
+    push_divider("Contacts")
+    for _, c in ipairs(contacts) do push_conv(c) end
+  end
+  if #groups > 0 then
+    push_divider("Groups")
+    for _, c in ipairs(groups) do push_conv(c) end
   end
 
   write_buf(lines, specs)
@@ -163,11 +185,17 @@ function M.register_keymaps()
 end
 
 local DEBUG_CONVS = {
-  { id = "+43111000001", name = "Alice",        kind = "contact", snippet = "Hey, how are you?",          time = "12:34", unread = 2 },
-  { id = "+43111000002", name = "Bob",          kind = "contact", snippet = "See you tomorrow!",           time = "09:11", unread = 0 },
-  { id = "+43111000003", name = "Charlie",      kind = "contact", snippet = "",                            time = "Mon",   unread = 0 },
-  { id = "group-abc",   name = "Family Group",  kind = "group",   snippet = "Dinner on Sunday?",           time = "Tue",   unread = 1 },
-  { id = "group-xyz",   name = "Work Team",     kind = "group",   snippet = "PR merged — deploying now",   time = "Wed",   unread = 0 },
+  { id = "+43111000001", name = "Alice",          kind = "contact", snippet = "Hey, how are you?",            time = "12:34", unread = 2 },
+  { id = "+43111000002", name = "Bob",            kind = "contact", snippet = "See you tomorrow!",             time = "09:11", unread = 0 },
+  { id = "+43111000003", name = "Charlie",        kind = "contact", snippet = "Sounds good 👍",               time = "Mon",   unread = 0 },
+  { id = "+43111000004", name = "Mia",            kind = "contact", snippet = "Can you call me later?",        time = "11:52", unread = 3 },
+  { id = "+43111000005", name = "David",          kind = "contact", snippet = "Thanks for the help!",          time = "Tue",   unread = 0 },
+  { id = "+43111000006", name = "Sophie",         kind = "contact", snippet = "Running 10 min late, sorry",    time = "08:30", unread = 1 },
+  { id = "+43111000007", name = "Lukas",          kind = "contact", snippet = "",                              time = "Sun",   unread = 0 },
+  { id = "group-abc",   name = "Family Group",    kind = "group",   snippet = "Dinner on Sunday?",             time = "Tue",   unread = 1 },
+  { id = "group-xyz",   name = "Work Team",       kind = "group",   snippet = "PR merged — deploying now",     time = "Wed",   unread = 0 },
+  { id = "group-def",   name = "Team Sprint",     kind = "group",   snippet = "Retro is at 15:00 tomorrow",    time = "10:05", unread = 4 },
+  { id = "group-ghi",   name = "Climbing Crew",   kind = "group",   snippet = "New route opened at Kletterhalle", time = "Sat", unread = 0 },
 }
 
 function M.fetch_and_render()
