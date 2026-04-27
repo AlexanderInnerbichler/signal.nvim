@@ -4,6 +4,8 @@ local config = require("signal.config")
 
 local ns = vim.api.nvim_create_namespace("Signal")
 
+local PIN_FILE = vim.fn.expand("~/.local/share/signal-cli/nvim-pinned.json")
+
 local state = {
   buf            = nil,
   win            = nil,
@@ -12,9 +14,32 @@ local state = {
   account        = nil,
   line_conv_map  = {},
   filter         = "",
+  pinned         = {},
+  last_sync      = nil,
 }
 
-local FOOTER = " <CR> open  ·  r refresh  ·  q close "
+local function load_pins()
+  local f = io.open(PIN_FILE, "r")
+  if not f then return {} end
+  local raw = f:read("*a")
+  f:close()
+  local ok, data = pcall(vim.fn.json_decode, raw)
+  if ok and type(data) == "table" then return data end
+  return {}
+end
+
+local function save_pins(set)
+  local ok, encoded = pcall(vim.fn.json_encode, set)
+  if not ok then return end
+  local f = io.open(PIN_FILE, "w")
+  if f then f:write(encoded) f:close() end
+end
+
+local function make_footer()
+  local base = " <CR> open  ·  /  filter  ·  r refresh"
+  local sync = state.last_sync and ("  ·  synced " .. os.date("%H:%M", state.last_sync)) or ""
+  return base .. sync .. "  ·  q close "
+end
 
 local function is_valid()
   return state.buf and vim.api.nvim_buf_is_valid(state.buf)
@@ -44,7 +69,7 @@ local function render_list()
     or  " Signal "
   local footer = state.filter ~= ""
     and (" / " .. state.filter .. "  ·  <Esc> clear ")
-    or  FOOTER
+    or  make_footer()
   vim.api.nvim_win_set_config(state.win, {
     title      = title,
     title_pos  = "center",
@@ -89,24 +114,26 @@ local function render_list()
     local pad  = win_width - #label - 8
     local bar  = string.rep("─", math.max(2, math.floor(pad / 2)))
     local line = "  " .. bar .. "  " .. label .. "  " .. bar
-    local lnum = #lines  -- 0-indexed
+    local lnum = #lines
     table.insert(lines, line)
     table.insert(specs, { hl = "SignalTime", line = lnum, col_s = 0, col_e = -1 })
     table.insert(lines, "")
   end
 
   local function push_conv(c)
-    local icon    = c.kind == "group" and "  " or "  "
-    local name    = c.name or c.id or "Unknown"
-    local snippet = c.snippet or ""
-    local badge   = (c.unread and c.unread > 0) and (" [" .. c.unread .. "]") or ""
-    local timestr = (c.time or "") .. badge
-    local prefix  = "  " .. icon
-    local gap     = math.max(1, win_width - #prefix - #name - #timestr - 2)
-    local line1   = prefix .. name .. string.rep(" ", gap) .. timestr
-    local line2   = "    " .. snippet:sub(1, win_width - 6)
+    local is_pinned = state.pinned[c.id]
+    local icon      = c.kind == "group" and "  " or "  "
+    local pin_pfx   = is_pinned and "📌 " or ""
+    local name      = pin_pfx .. (c.name or c.id or "Unknown")
+    local snippet   = c.snippet or ""
+    local badge     = (c.unread and c.unread > 0) and (" [" .. c.unread .. "]") or ""
+    local timestr   = (c.time or "") .. badge
+    local prefix    = "  " .. icon
+    local gap       = math.max(1, win_width - #prefix - #name - #timestr - 2)
+    local line1     = prefix .. name .. string.rep(" ", gap) .. timestr
+    local line2     = "    " .. snippet:sub(1, win_width - 6)
 
-    local name_lnum    = #lines      -- 0-indexed
+    local name_lnum    = #lines
     local snippet_lnum = #lines + 1
 
     table.insert(lines, line1)
@@ -138,19 +165,112 @@ local function render_list()
     end, visible)
   end
 
-  local contacts = vim.tbl_filter(function(c) return c.kind ~= "group" end, visible)
-  local groups   = vim.tbl_filter(function(c) return c.kind == "group"  end, visible)
+  local pinned   = vim.tbl_filter(function(c) return state.pinned[c.id] end, visible)
+  local contacts = vim.tbl_filter(function(c) return c.kind ~= "group" and not state.pinned[c.id] end, visible)
+  local groups   = vim.tbl_filter(function(c) return c.kind == "group"  and not state.pinned[c.id] end, visible)
 
-  if #contacts > 0 then
-    push_divider("Contacts")
-    for _, c in ipairs(contacts) do push_conv(c) end
-  end
-  if #groups > 0 then
-    push_divider("Groups")
-    for _, c in ipairs(groups) do push_conv(c) end
-  end
+  if #pinned   > 0 then push_divider("Pinned")   for _, c in ipairs(pinned)   do push_conv(c) end end
+  if #contacts > 0 then push_divider("Contacts") for _, c in ipairs(contacts) do push_conv(c) end end
+  if #groups   > 0 then push_divider("Groups")   for _, c in ipairs(groups)   do push_conv(c) end end
 
   write_buf(lines, specs)
+end
+
+function M.show_profile(conv)
+  local W, H = 48, 10
+  local ui   = vim.api.nvim_list_uis()[1] or { width = 180, height = 50 }
+  local pbuf = vim.api.nvim_create_buf(false, true)
+  vim.bo[pbuf].bufhidden  = "wipe"
+  vim.bo[pbuf].buftype    = "nofile"
+  vim.bo[pbuf].modifiable = false
+
+  local pwin = vim.api.nvim_open_win(pbuf, true, {
+    relative   = "editor",
+    width      = W,
+    height     = H,
+    row        = math.floor((ui.height - H) / 2),
+    col        = math.floor((ui.width  - W) / 2),
+    style      = "minimal",
+    border     = "rounded",
+    title      = " Profile ",
+    title_pos  = "center",
+    footer     = " q close ",
+    footer_pos = "center",
+  })
+  vim.wo[pwin].number         = false
+  vim.wo[pwin].relativenumber = false
+  vim.wo[pwin].signcolumn     = "no"
+
+  local function close_profile()
+    if vim.api.nvim_win_is_valid(pwin) then
+      vim.api.nvim_win_close(pwin, true)
+    end
+  end
+  vim.keymap.set("n", "q",     close_profile, { buffer = pbuf, nowait = true, silent = true })
+  vim.keymap.set("n", "<Esc>", close_profile, { buffer = pbuf, nowait = true, silent = true })
+
+  local ns_p = vim.api.nvim_create_namespace("SignalProfile")
+
+  local function render_profile(name, number, kind, about)
+    local icon = kind == "group" and "󰀼" or "󰀄"
+    local sep  = string.rep("─", W - 4)
+    local lns  = {
+      "",
+      "  " .. icon .. "  " .. name,
+      "  " .. sep,
+      "",
+    }
+    if kind ~= "group" and number then
+      table.insert(lns, "  Number    " .. number)
+    end
+    table.insert(lns, "  Type      " .. (kind == "group" and "Group" or "Contact"))
+    if kind == "group" then
+      table.insert(lns, "  ID        " .. (conv.id or ""))
+    end
+    if about and about ~= "" then
+      table.insert(lns, "  About     " .. about)
+    end
+
+    vim.bo[pbuf].modifiable = true
+    vim.api.nvim_buf_set_lines(pbuf, 0, -1, false, lns)
+    vim.bo[pbuf].modifiable = false
+    vim.api.nvim_buf_clear_namespace(pbuf, ns_p, 0, -1)
+    vim.api.nvim_buf_add_highlight(pbuf, ns_p, "SignalName", 1, 5, -1)
+    vim.api.nvim_buf_add_highlight(pbuf, ns_p, "SignalTime", 2, 0, -1)
+  end
+
+  if config.get().debug then
+    render_profile(conv.name or conv.id, conv.id, conv.kind)
+    return
+  end
+
+  if conv.kind == "group" then
+    render_profile(conv.name or conv.id, nil, "group")
+    return
+  end
+
+  local cmd  = config.get().signal_cmd
+  local args = { cmd, "-a", state.account, "listContacts", "--output=json" }
+  vim.system(args, { text = true }, function(result)
+    vim.schedule(function()
+      if not vim.api.nvim_win_is_valid(pwin) then return end
+      local name, number, about = conv.name or conv.id, conv.id, nil
+      if result.code == 0 and result.stdout and result.stdout ~= "" then
+        local ok, data = pcall(vim.fn.json_decode, result.stdout)
+        if ok and type(data) == "table" then
+          for _, c in ipairs(data) do
+            if c.number == conv.id then
+              name   = (c.name and c.name ~= "") and c.name or name
+              number = c.number or number
+              about  = c.profile and c.profile.about or nil
+              break
+            end
+          end
+        end
+      end
+      render_profile(name, number, "contact", about)
+    end)
+  end)
 end
 
 function M.register_keymaps()
@@ -182,6 +302,25 @@ function M.register_keymaps()
       require("signal.thread").open(conv, state.account, state.buf, state.win)
     end
   end)
+  bmap("p", function()
+    if not is_valid() then return end
+    local cur  = vim.api.nvim_win_get_cursor(state.win)[1]
+    local conv = state.line_conv_map[cur]
+    if conv then M.show_profile(conv) end
+  end)
+  bmap("P", function()
+    if not is_valid() then return end
+    local cur  = vim.api.nvim_win_get_cursor(state.win)[1]
+    local conv = state.line_conv_map[cur]
+    if not conv then return end
+    if state.pinned[conv.id] then
+      state.pinned[conv.id] = nil
+    else
+      state.pinned[conv.id] = true
+    end
+    save_pins(state.pinned)
+    render_list()
+  end)
 end
 
 local DEBUG_CONVS = {
@@ -202,6 +341,7 @@ function M.fetch_and_render()
   if config.get().debug then
     state.conversations = vim.deepcopy(DEBUG_CONVS)
     state.is_loading    = false
+    state.last_sync     = os.time()
     render_list()
     return
   end
@@ -238,6 +378,7 @@ function M.fetch_and_render()
     end
     state.conversations = convs
     state.is_loading    = false
+    state.last_sync     = os.time()
     render_list()
   end
 
@@ -279,7 +420,7 @@ local function open_win()
       border     = "rounded",
       title      = " Signal ",
       title_pos  = "center",
-      footer     = FOOTER,
+      footer     = make_footer(),
       footer_pos = "center",
     })
     vim.wo[state.win].number         = false
@@ -308,6 +449,7 @@ function M.close()
 end
 
 function M.open()
+  state.pinned = load_pins()
   if config.get().debug then
     state.account = "+43000000000"
     open_win()
