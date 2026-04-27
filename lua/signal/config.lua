@@ -1,5 +1,7 @@
 local M = {}
 
+M.ACCOUNT_CACHE = vim.fn.expand("~/.local/share/signal-cli/nvim-account")
+
 local defaults = {
   poll_interval = 30,
   notif_ttl     = 5,
@@ -26,6 +28,18 @@ function M.ready()
 end
 
 function M.resolve_account(callback)
+  -- fast path: use cached number written after last successful verify
+  local f = io.open(M.ACCOUNT_CACHE, "r")
+  if f then
+    local num = vim.trim(f:read("*a") or "")
+    f:close()
+    if num ~= "" then
+      callback(num)
+      return
+    end
+  end
+
+  -- slow path: ask signal-cli
   local cmd = _config.signal_cmd
   vim.system({ cmd, "--output=json", "listAccounts" }, { text = true }, function(result)
     vim.schedule(function()

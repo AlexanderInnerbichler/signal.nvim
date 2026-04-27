@@ -358,6 +358,8 @@ function M.handle_sms(code)
   vim.system(args, { text = true }, function(result)
     vim.schedule(function()
       if result.code == 0 then
+        local f = io.open(config.ACCOUNT_CACHE, "w")
+        if f then f:write(state.number) f:close() end
         log("ok",   "Registered successfully!")
         log("info", "You can now close this window and use :Signal")
         state.step = "done"
