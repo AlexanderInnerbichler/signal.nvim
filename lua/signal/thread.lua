@@ -5,14 +5,15 @@ local config = require("signal.config")
 local ns = vim.api.nvim_create_namespace("SignalThread")
 
 local state = {
-  conversation = nil,
-  account      = nil,
-  messages     = {},
-  buf          = nil,
-  win          = nil,
-  input_buf    = nil,
-  input_win    = nil,
-  is_loading   = false,
+  conversation  = nil,
+  account       = nil,
+  messages      = {},
+  buf           = nil,
+  win           = nil,
+  input_buf     = nil,
+  input_win     = nil,
+  is_loading    = false,
+  line_msg_map  = {},
 }
 
 local function write_buf(lines, specs)
@@ -31,7 +32,6 @@ local function format_ts(ts)
   local t        = math.floor(ts / 1000)
   local now      = os.time()
   local day_secs = 86400
-  -- floor to local midnight using offset trick
   local tz_off   = os.time(os.date("*t", now)) - os.time(os.date("!*t", now))
   local today_s  = math.floor((now + tz_off) / day_secs) * day_secs - tz_off
   if t >= today_s then
@@ -45,6 +45,18 @@ local function format_ts(ts)
   end
 end
 
+local function day_label(ts)
+  if not ts or ts == 0 then return "Unknown" end
+  local t       = math.floor(ts / 1000)
+  local now     = os.time()
+  local tz_off  = os.time(os.date("*t", now)) - os.time(os.date("!*t", now))
+  local today_s = math.floor((now + tz_off) / 86400) * 86400 - tz_off
+  if t >= today_s             then return "Today"
+  elseif t >= today_s - 86400 then return "Yesterday"
+  elseif t >= today_s - 6 * 86400 then return os.date("%A", t)
+  else return os.date("%d %b %Y", t) end
+end
+
 local function render()
   if not state.buf or not vim.api.nvim_buf_is_valid(state.buf) then return end
 
@@ -53,7 +65,7 @@ local function render()
     vim.api.nvim_win_set_config(state.win, {
       title      = " " .. (conv and conv.name or "Thread") .. " ",
       title_pos  = "center",
-      footer     = " s compose  ·  r refresh  ·  q back ",
+      footer     = " s compose  ·  gr reply  ·  r refresh  ·  q back ",
       footer_pos = "center",
     })
   end
@@ -68,8 +80,14 @@ local function render()
     return
   end
 
+  local win_w = state.win and vim.api.nvim_win_is_valid(state.win)
+    and vim.api.nvim_win_get_width(state.win) or 80
+
   local lines = { "" }
   local specs = {}
+  state.line_msg_map = {}
+
+  local prev_day = nil
 
   for _, msg in ipairs(state.messages) do
     local is_self  = msg.source == state.account
@@ -77,6 +95,18 @@ local function render()
     local time_str = format_ts(msg.timestamp)
     local body     = msg.message or ""
     local attach   = msg.attachments and "📎 " or ""
+
+    -- date separator
+    local this_day = day_label(msg.timestamp or 0)
+    if this_day ~= prev_day then
+      prev_day       = this_day
+      local label    = this_day
+      local pad      = win_w - #label - 8
+      local bar      = string.rep("─", math.max(2, math.floor(pad / 2)))
+      local div_ln   = #lines
+      table.insert(lines, "  " .. bar .. "  " .. label .. "  " .. bar)
+      table.insert(specs, { hl = "SignalTime", line = div_ln, col_s = 0, col_e = -1 })
+    end
 
     local header_ln = #lines
     table.insert(lines, "  " .. sender .. "  " .. time_str)
@@ -88,6 +118,7 @@ local function render()
       hl = "SignalTime",
       line = header_ln, col_s = 2 + #sender + 2, col_e = -1,
     })
+    state.line_msg_map[header_ln + 1] = msg
 
     local body_lines = vim.split(body, "\n", { plain = true })
     for bi, bline in ipairs(body_lines) do
@@ -95,6 +126,7 @@ local function render()
       local prefix  = bi == 1 and ("    " .. attach) or "    "
       table.insert(lines, prefix .. bline)
       table.insert(specs, { hl = "SignalMsgBody", line = body_ln, col_s = 4, col_e = -1 })
+      state.line_msg_map[body_ln + 1] = msg
     end
     table.insert(lines, "")
   end
@@ -113,19 +145,33 @@ local function close_input()
   state.input_buf = nil
 end
 
-local function open_input()
+local function open_input(quoted_msg)
   close_input()
 
   state.input_buf = vim.api.nvim_create_buf(false, true)
   vim.bo[state.input_buf].buftype   = "nofile"
   vim.bo[state.input_buf].bufhidden = "wipe"
   vim.bo[state.input_buf].filetype  = "text"
-  vim.api.nvim_buf_set_lines(state.input_buf, 0, -1, false, { "" })
 
-  local ui   = vim.api.nvim_list_uis()[1] or { width = 180, height = 50 }
-  local w    = math.floor(ui.width * 0.60)
-  local h    = 8
   local conv = state.conversation
+
+  if quoted_msg then
+    local qsender  = quoted_msg.source == state.account
+      and "You"
+      or (conv and conv.name or quoted_msg.source or "?")
+    local qbody    = (quoted_msg.message or ""):match("([^\n]*)")
+    vim.api.nvim_buf_set_lines(state.input_buf, 0, -1, false,
+      { "> " .. qsender .. ": " .. qbody, "" })
+  else
+    vim.api.nvim_buf_set_lines(state.input_buf, 0, -1, false, { "" })
+  end
+
+  local ui  = vim.api.nvim_list_uis()[1] or { width = 180, height = 50 }
+  local w   = math.floor(ui.width * 0.60)
+  local h   = 8
+  local ttl = quoted_msg
+    and (" Reply to " .. (conv and conv.name or "?") .. " ")
+    or  (" Send to "  .. (conv and conv.name or "?") .. " ")
 
   state.input_win = vim.api.nvim_open_win(state.input_buf, true, {
     relative   = "editor",
@@ -135,14 +181,14 @@ local function open_input()
     col        = math.floor((ui.width  - w) / 2),
     style      = "minimal",
     border     = "rounded",
-    title      = " Send to " .. (conv and conv.name or "?") .. " ",
+    title      = ttl,
     title_pos  = "center",
     footer     = " <C-s> send  ·  q / <Esc> cancel ",
     footer_pos = "center",
   })
   vim.wo[state.input_win].wrap      = true
   vim.wo[state.input_win].linebreak = true
-  vim.cmd("startinsert")
+  vim.cmd("startinsert!")
 
   local function do_send()
     local all_lines = vim.api.nvim_buf_get_lines(state.input_buf, 0, -1, false)
@@ -200,8 +246,14 @@ local function register_keymaps()
     close_input()
     require("signal").return_to_list()
   end)
-  bmap("s", open_input)
-  bmap("r", M.refresh)
+  bmap("s",    function() open_input() end)
+  bmap("r",    M.refresh)
+  bmap("gr",   function()
+    if not (state.win and vim.api.nvim_win_is_valid(state.win)) then return end
+    local cur = vim.api.nvim_win_get_cursor(state.win)[1]
+    local msg = state.line_msg_map[cur]
+    if msg then open_input(msg) end
+  end)
 end
 
 local function now_ms() return os.time() * 1000 end
@@ -280,7 +332,6 @@ function M.refresh()
     local msgs = DEBUG_THREADS[conv_id] or {}
     state.messages   = msgs
     state.is_loading = false
-    -- update snippet in conversation list
     if state.conversation and #msgs > 0 then
       local last = msgs[#msgs]
       local icon = last.attachments and "📎 " or ""
@@ -328,6 +379,7 @@ function M.open(conversation, account, buf, win)
   state.buf          = buf
   state.win          = win
   state.messages     = {}
+  state.line_msg_map = {}
   register_keymaps()
   M.refresh()
 end
