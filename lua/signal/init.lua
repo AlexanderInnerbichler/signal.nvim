@@ -11,6 +11,7 @@ local state = {
   is_loading     = false,
   account        = nil,
   line_conv_map  = {},
+  filter         = "",
 }
 
 local FOOTER = " <CR> open  ·  r refresh  ·  q close "
@@ -41,10 +42,13 @@ local function render_list()
   local title = total_unread > 0
     and (" Signal [" .. total_unread .. "] ")
     or  " Signal "
+  local footer = state.filter ~= ""
+    and (" / " .. state.filter .. "  ·  <Esc> clear ")
+    or  FOOTER
   vim.api.nvim_win_set_config(state.win, {
     title      = title,
     title_pos  = "center",
-    footer     = FOOTER,
+    footer     = footer,
     footer_pos = "center",
   })
 
@@ -73,7 +77,15 @@ local function render_list()
   local specs       = {}
   state.line_conv_map = {}
 
-  for i, c in ipairs(state.conversations) do
+  local visible = state.conversations
+  if state.filter ~= "" then
+    local q = state.filter:lower()
+    visible = vim.tbl_filter(function(c)
+      return (c.name or ""):lower():find(q, 1, true) ~= nil
+    end, visible)
+  end
+
+  for i, c in ipairs(visible) do
     local idx     = i - 1  -- 0-based
     local icon    = c.kind == "group" and "  " or "  "
     local name    = c.name or c.id or "Unknown"
@@ -124,8 +136,20 @@ function M.register_keymaps()
     vim.keymap.set("n", lhs, fn, { buffer = state.buf, nowait = true, silent = true })
   end
   bmap("q",     M.close)
-  bmap("<Esc>", M.close)
+  bmap("<Esc>", function()
+    if state.filter ~= "" then
+      state.filter = ""
+      render_list()
+    else
+      M.close()
+    end
+  end)
   bmap("r",     function() M.fetch_and_render() end)
+  bmap("/",     function()
+    local q = vim.fn.input("/")
+    state.filter = vim.trim(q)
+    render_list()
+  end)
   bmap("<CR>",  function()
     if not is_valid() then return end
     local cur  = vim.api.nvim_win_get_cursor(state.win)[1]
@@ -240,6 +264,7 @@ local function open_win()
 end
 
 function M.return_to_list()
+  state.filter = ""
   for _, c in ipairs(state.conversations) do
     c.unread = require("signal.notifs").get_unread(c.id)
   end
