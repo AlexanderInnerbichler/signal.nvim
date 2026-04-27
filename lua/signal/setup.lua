@@ -9,12 +9,13 @@ local H = 22
 local SEP = "  " .. string.rep("─", W - 6)
 
 local state = {
-  buf    = nil,
-  win    = nil,
-  log    = {},   -- list of {kind, text}
-  step   = nil,  -- "phone" | "captcha" | "sms" | "done" | "error"
-  number = nil,
-  in_input = false,
+  buf        = nil,
+  win        = nil,
+  log        = {},   -- list of {kind, text}
+  step       = nil,  -- "phone" | "captcha" | "sms" | "done" | "error"
+  number     = nil,
+  in_input   = false,
+  input_line = nil,  -- 1-indexed buffer line where user types
 }
 
 -- ── log kinds ────────────────────────────────────────────────────────────────
@@ -112,8 +113,9 @@ local function on_submit()
   vim.cmd("stopinsert")
   if not state.buf or not vim.api.nvim_buf_is_valid(state.buf) then return end
 
-  local all   = vim.api.nvim_buf_get_lines(state.buf, 0, -1, false)
-  local value = vim.trim(all[#all] or "")
+  local lnum  = state.input_line
+  local raw   = lnum and vim.api.nvim_buf_get_lines(state.buf, lnum - 1, lnum, false)[1] or ""
+  local value = vim.trim(raw)
 
   clear_input_lines()
   set_modifiable(false)
@@ -140,8 +142,9 @@ local function show_input(prompt)
   flush()
 
   if state.win and vim.api.nvim_win_is_valid(state.win) then
-    local line_count = vim.api.nvim_buf_line_count(state.buf)
-    vim.api.nvim_win_set_cursor(state.win, { line_count, 0 })
+    state.input_line = vim.api.nvim_buf_line_count(state.buf)
+    vim.api.nvim_set_current_win(state.win)
+    vim.api.nvim_win_set_cursor(state.win, { state.input_line, 0 })
   end
   vim.cmd("startinsert!")
 
