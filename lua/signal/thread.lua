@@ -1,5 +1,6 @@
-local M   = {}
-local cli = require("signal.cli")
+local M      = {}
+local cli    = require("signal.cli")
+local config = require("signal.config")
 
 local ns = vim.api.nvim_create_namespace("SignalThread")
 
@@ -55,7 +56,6 @@ local function render()
 
   local lines = { "" }
   local specs = {}
-  local phone = config.get().phone_number
 
   for _, msg in ipairs(state.messages) do
     local is_self  = msg.source == state.account
@@ -135,6 +135,13 @@ local function open_input()
     if state.win and vim.api.nvim_win_is_valid(state.win) then
       vim.api.nvim_set_current_win(state.win)
     end
+    if config.get().debug then
+      local thread = DEBUG_THREADS[conv.id] or {}
+      table.insert(thread, { source = state.account, message = body, timestamp = now_ms() })
+      DEBUG_THREADS[conv.id] = thread
+      M.refresh()
+      return
+    end
     cli.send(state.account, conv.id, body, conv.kind == "group", function(err)
       if err then
         vim.notify("signal.nvim: send failed: " .. err, vim.log.levels.ERROR)
@@ -178,7 +185,51 @@ local function register_keymaps()
   bmap("r", M.refresh)
 end
 
+local function now_ms() return os.time() * 1000 end
+local function ago_ms(minutes) return (os.time() - minutes * 60) * 1000 end
+
+local DEBUG_THREADS = {
+  ["+43111000001"] = {  -- Alice
+    { source = "+43111000001", message = "Hey! Are you free this weekend?",       timestamp = ago_ms(120) },
+    { source = "+43000000000", message = "Yeah, what did you have in mind?",       timestamp = ago_ms(118) },
+    { source = "+43111000001", message = "Maybe hiking? The weather looks great.", timestamp = ago_ms(115) },
+    { source = "+43000000000", message = "I'm in! Saturday or Sunday?",            timestamp = ago_ms(110) },
+    { source = "+43111000001", message = "Saturday works. Let's say 10am?",        timestamp = ago_ms(90)  },
+    { source = "+43000000000", message = "Perfect, see you then!",                 timestamp = ago_ms(88)  },
+    { source = "+43111000001", message = "Hey, how are you?",                      timestamp = ago_ms(5)   },
+  },
+  ["+43111000002"] = {  -- Bob
+    { source = "+43000000000", message = "Did you get the deploy done?",           timestamp = ago_ms(60) },
+    { source = "+43111000002", message = "Almost, ran into a migration issue.",     timestamp = ago_ms(55) },
+    { source = "+43000000000", message = "Need help?",                             timestamp = ago_ms(54) },
+    { source = "+43111000002", message = "Nah got it. See you tomorrow!",           timestamp = ago_ms(10) },
+  },
+  ["+43111000003"] = {  -- Charlie (no recent messages)
+    { source = "+43111000003", message = "Talk later?",                            timestamp = ago_ms(2880) },
+    { source = "+43000000000", message = "Sure, ping me anytime.",                 timestamp = ago_ms(2870) },
+  },
+  ["group-abc"] = {  -- Family Group
+    { source = "+43111000001", message = "Who's coming Sunday?",                   timestamp = ago_ms(200) },
+    { source = "+43111000002", message = "We'll be there 👍",                      timestamp = ago_ms(195) },
+    { source = "+43000000000", message = "Same, bringing dessert.",                timestamp = ago_ms(190) },
+    { source = "+43111000001", message = "Dinner on Sunday?",                      timestamp = ago_ms(30)  },
+  },
+  ["group-xyz"] = {  -- Work Team
+    { source = "+43111000002", message = "PR is up, needs review.",                timestamp = ago_ms(300) },
+    { source = "+43000000000", message = "On it.",                                 timestamp = ago_ms(295) },
+    { source = "+43111000002", message = "PR merged — deploying now",              timestamp = ago_ms(10)  },
+  },
+}
+
 function M.refresh()
+  if config.get().debug then
+    local conv_id = state.conversation and state.conversation.id
+    state.messages   = DEBUG_THREADS[conv_id] or {}
+    state.is_loading = false
+    render()
+    return
+  end
+
   state.is_loading = true
   render()
   cli.receive(state.account, function(err, data)
