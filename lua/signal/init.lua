@@ -34,8 +34,15 @@ end
 local function render_list()
   if not is_valid() then return end
 
+  local total_unread = 0
+  for _, c in ipairs(state.conversations) do
+    total_unread = total_unread + (c.unread or 0)
+  end
+  local title = total_unread > 0
+    and (" Signal [" .. total_unread .. "] ")
+    or  " Signal "
   vim.api.nvim_win_set_config(state.win, {
-    title      = " Signal ",
+    title      = title,
     title_pos  = "center",
     footer     = FOOTER,
     footer_pos = "center",
