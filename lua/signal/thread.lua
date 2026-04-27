@@ -108,16 +108,33 @@ local function render()
       table.insert(specs, { hl = "SignalTime", line = div_ln, col_s = 0, col_e = -1 })
     end
 
-    local header_ln = #lines
-    table.insert(lines, "  " .. sender .. "  " .. time_str)
+    local receipt_glyph, receipt_hl = "", nil
+    if is_self then
+      if msg.status == "read" then
+        receipt_glyph = "  ✓✓"
+        receipt_hl    = "SignalReceiptRead"
+      elseif msg.status == "delivered" then
+        receipt_glyph = "  ✓✓"
+        receipt_hl    = "SignalReceiptSent"
+      elseif msg.status == "sent" then
+        receipt_glyph = "  ✓"
+        receipt_hl    = "SignalReceiptSent"
+      end
+    end
+
+    local header_ln   = #lines
+    local header_line = "  " .. sender .. "  " .. time_str .. receipt_glyph
+    table.insert(lines, header_line)
     table.insert(specs, {
       hl = is_self and "SignalSenderSelf" or "SignalSenderOther",
       line = header_ln, col_s = 2, col_e = 2 + #sender,
     })
-    table.insert(specs, {
-      hl = "SignalTime",
-      line = header_ln, col_s = 2 + #sender + 2, col_e = -1,
-    })
+    local time_s = 2 + #sender + 2
+    local time_e = time_s + #time_str
+    table.insert(specs, { hl = "SignalTime", line = header_ln, col_s = time_s, col_e = time_e })
+    if receipt_hl then
+      table.insert(specs, { hl = receipt_hl, line = header_ln, col_s = time_e, col_e = -1 })
+    end
     state.line_msg_map[header_ln + 1] = msg
 
     local body_lines = vim.split(body, "\n", { plain = true })
@@ -200,7 +217,7 @@ local function open_input(quoted_msg)
     end
     if config.get().debug then
       local thread = DEBUG_THREADS[conv.id] or {}
-      table.insert(thread, { source = state.account, message = body, timestamp = now_ms() })
+      table.insert(thread, { source = state.account, message = body, timestamp = now_ms(), status = "sent" })
       DEBUG_THREADS[conv.id] = thread
       require("signal.notifs").show_sent_toast()
       M.refresh()
@@ -262,17 +279,17 @@ local function ago_ms(minutes) return (os.time() - minutes * 60) * 1000 end
 local DEBUG_THREADS = {
   ["+43111000001"] = {  -- Alice
     { source = "+43111000001", message = "Hey! Are you free this weekend?",       timestamp = ago_ms(120) },
-    { source = "+43000000000", message = "Yeah, what did you have in mind?",       timestamp = ago_ms(118) },
+    { source = "+43000000000", message = "Yeah, what did you have in mind?",       timestamp = ago_ms(118), status = "read" },
     { source = "+43111000001", message = "Maybe hiking? The weather looks great.", timestamp = ago_ms(115), attachments = true },
-    { source = "+43000000000", message = "I'm in! Saturday or Sunday?",            timestamp = ago_ms(110) },
+    { source = "+43000000000", message = "I'm in! Saturday or Sunday?",            timestamp = ago_ms(110), status = "read" },
     { source = "+43111000001", message = "Saturday works. Let's say 10am?",        timestamp = ago_ms(90)  },
-    { source = "+43000000000", message = "Perfect, see you then!",                 timestamp = ago_ms(88)  },
+    { source = "+43000000000", message = "Perfect, see you then!",                 timestamp = ago_ms(88),  status = "read" },
     { source = "+43111000001", message = "Hey, how are you?",                      timestamp = ago_ms(5)   },
   },
   ["+43111000002"] = {  -- Bob
-    { source = "+43000000000", message = "Did you get the deploy done?",           timestamp = ago_ms(60) },
+    { source = "+43000000000", message = "Did you get the deploy done?",           timestamp = ago_ms(60), status = "read" },
     { source = "+43111000002", message = "Almost, ran into a migration issue.",     timestamp = ago_ms(55) },
-    { source = "+43000000000", message = "Need help?",                             timestamp = ago_ms(54) },
+    { source = "+43000000000", message = "Need help?",                             timestamp = ago_ms(54), status = "delivered" },
     { source = "+43111000002", message = "Nah got it. See you tomorrow!",           timestamp = ago_ms(10) },
   },
   ["+43111000003"] = {  -- Charlie (no recent messages)
@@ -282,12 +299,12 @@ local DEBUG_THREADS = {
   ["group-abc"] = {  -- Family Group
     { source = "+43111000001", message = "Who's coming Sunday?",                   timestamp = ago_ms(200) },
     { source = "+43111000002", message = "We'll be there 👍",                      timestamp = ago_ms(195) },
-    { source = "+43000000000", message = "Same, bringing dessert.",                timestamp = ago_ms(190) },
+    { source = "+43000000000", message = "Same, bringing dessert.",                timestamp = ago_ms(190), status = "read" },
     { source = "+43111000001", message = "Dinner on Sunday?",                      timestamp = ago_ms(30)  },
   },
   ["group-xyz"] = {  -- Work Team
     { source = "+43111000002", message = "PR is up, needs review.",                timestamp = ago_ms(300) },
-    { source = "+43000000000", message = "On it.",                                 timestamp = ago_ms(295) },
+    { source = "+43000000000", message = "On it.",                                 timestamp = ago_ms(295), status = "read" },
     { source = "+43111000002", message = "PR merged — deploying now",              timestamp = ago_ms(10)  },
   },
   ["+43111000004"] = {  -- Mia
