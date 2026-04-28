@@ -5,9 +5,10 @@ local NOTIF_WIDTH  = 55
 local NOTIF_HEIGHT = 3
 
 local state = {
-  seen_ts  = {},
-  unread   = {},
-  toasts   = {},
+  seen_ts    = {},
+  unread     = {},
+  toasts     = {},
+  own_number = nil,
 }
 
 local function dismiss_toast(toast)
@@ -40,15 +41,15 @@ local function show_toast(text)
   vim.bo[buf].modifiable = false
 
   local win = vim.api.nvim_open_win(buf, false, {
-    relative = "editor",
-    width    = NOTIF_WIDTH,
-    height   = NOTIF_HEIGHT,
-    row      = row,
-    col      = ui.width - NOTIF_WIDTH - 2,
-    style    = "minimal",
-    border   = "rounded",
-    zindex   = 50,
-    title    = " Signal ",
+    relative  = "editor",
+    width     = NOTIF_WIDTH,
+    height    = NOTIF_HEIGHT,
+    row       = row,
+    col       = ui.width - NOTIF_WIDTH - 2,
+    style     = "minimal",
+    border    = "rounded",
+    zindex    = 50,
+    title     = " Signal ",
     title_pos = "center",
   })
 
@@ -82,6 +83,7 @@ function M.process_messages(messages)
 
   local signal_init = require("signal")
   local main_state  = signal_init.get_state()
+  local store       = require("signal.store")
 
   for _, envelope in ipairs(messages) do
     local dm  = envelope.dataMessage or (envelope.envelope and envelope.envelope.dataMessage)
@@ -105,6 +107,8 @@ function M.process_messages(messages)
             break
           end
         end
+
+        store.append(src, { source = src, message = dm.message, timestamp = ts, is_self = false })
 
         local thread = require("signal.thread")
         if thread.get_current_conv_id() == src then
@@ -132,6 +136,12 @@ function M.process_messages(messages)
         state.seen_ts[dest_id] = sm_ts
         local snippet  = sm.message:sub(1, 40)
         local time_str = fmt_ts(sm_ts)
+        store.append(dest_id, {
+          source    = state.own_number or "self",
+          message   = sm.message,
+          timestamp = sm_ts,
+          is_self   = true,
+        })
         signal_init.update_snippet(dest_id, snippet, time_str)
       end
     end
@@ -158,14 +168,11 @@ function M.setup()
 
   config.resolve_account(function(number)
     if not number then return end
+    state.own_number = number
     local daemon = require("signal.daemon")
     daemon.start(number, function(params)
       M.process_messages({ params })
     end)
-    -- Ask primary device to resend recent sent-message sync data after JVM starts
-    vim.defer_fn(function()
-      daemon.call("sendSyncRequest", {}, function() end)
-    end, 8000)
   end)
 end
 

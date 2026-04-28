@@ -59,28 +59,18 @@ function M.resolve_account(callback)
   if f then
     local num = vim.trim(f:read("*a") or "")
     f:close()
-    if num ~= "" then
-      -- verify the cached number is still registered before trusting it
-      list_accounts(cmd, function(accounts)
-        if accounts then
-          for _, acc in ipairs(accounts) do
-            if acc.number == num then
-              callback(num)
-              return
-            end
-          end
-        end
-        -- stale cache — number gone from listAccounts
-        os.remove(M.ACCOUNT_CACHE)
-        callback(nil)
-      end)
+    if num:match("^%+%d+$") then
+      callback(num)
       return
     end
   end
-
+  -- Cache miss only — spawn listAccounts once to find the account
   list_accounts(cmd, function(accounts)
-    if accounts and accounts[1] and accounts[1].number then
-      callback(accounts[1].number)
+    local num = accounts and accounts[1] and accounts[1].number
+    if num then
+      local wf = io.open(M.ACCOUNT_CACHE, "w")
+      if wf then wf:write(num); wf:close() end
+      callback(num)
     else
       callback(nil)
     end

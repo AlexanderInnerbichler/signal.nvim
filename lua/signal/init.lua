@@ -20,6 +20,7 @@ local function load_conv_cache()
 end
 
 local function save_conv_cache(convs)
+  if not convs or #convs == 0 then return end
   conv_cache_data = { ts = os.time(), convs = convs }
   local ok, enc = pcall(vim.fn.json_encode, conv_cache_data)
   if not ok then return end

@@ -9,9 +9,6 @@ function M.list_groups(_, callback)
   daemon.call("listGroups", {}, callback)
 end
 
-function M.list_messages(_, _, callback)
-  callback("listMessages not available in signal-cli 0.14.x", nil)
-end
 
 function M.send(_, recipient, body, is_group, callback)
   local params = { message = body }
