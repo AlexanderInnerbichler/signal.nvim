@@ -120,6 +120,12 @@ local function render()
       elseif msg.status == "sent" then
         receipt_glyph = "  ✓"
         receipt_hl    = "SignalReceiptSent"
+      elseif msg.status == "sending" then
+        receipt_glyph = "  ⌛"
+        receipt_hl    = "SignalLoading"
+      elseif msg.status == "error" then
+        receipt_glyph = "  ✗"
+        receipt_hl    = "SignalSetupErr"
       end
     end
 
@@ -225,6 +231,7 @@ local function open_input(quoted_msg)
     title_pos  = "center",
     footer     = " <C-s> send  ·  q / <Esc> cancel ",
     footer_pos = "center",
+    zindex     = 250,
   })
   vim.wo[state.input_win].wrap      = true
   vim.wo[state.input_win].linebreak = true
@@ -238,21 +245,43 @@ local function open_input(quoted_msg)
     if state.win and vim.api.nvim_win_is_valid(state.win) then
       vim.api.nvim_set_current_win(state.win)
     end
+
+    local pending_msg = {
+      source    = state.account,
+      message   = body,
+      timestamp = os.time() * 1000,
+      status    = "sending",
+      _pending  = true,
+    }
+    table.insert(state.messages, pending_msg)
+    render()
+
     if config.get().debug then
       local thread = DEBUG_THREADS[conv.id] or {}
       table.insert(thread, { source = state.account, message = body, timestamp = now_ms(), status = "sent" })
       DEBUG_THREADS[conv.id] = thread
-      require("signal.notifs").show_sent_toast()
-      M.refresh()
+      pending_msg._pending = nil
+      pending_msg.status   = "sent"
+      render()
       return
     end
-    cli.send(state.account, conv.id, body, conv.kind == "group", function(err)
-      if err then
-        vim.notify("signal.nvim: send failed: " .. err, vim.log.levels.ERROR)
-      else
-        require("signal.notifs").show_sent_toast()
-        M.refresh()
+    cli.send(state.account, conv.id, body, conv.kind == "group", function(err, result)
+      for _, m in ipairs(state.messages) do
+        if m._pending then
+          m._pending = nil
+          if err then
+            m.status = "error"
+            vim.notify("signal.nvim: send failed: " .. err, vim.log.levels.ERROR)
+          else
+            local srv_ts = type(result) == "table" and result.timestamp
+            if srv_ts then m.timestamp = srv_ts end
+            m.status = "sent"
+            store.append(conv.id, m)
+          end
+          break
+        end
       end
+      render()
     end)
   end
 
