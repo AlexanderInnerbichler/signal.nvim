@@ -74,7 +74,16 @@ local function connect(on_ready)
   if on_ready then on_ready(nil) end
 end
 
-local function wait_for_socket(account, attempts)
+-- Kill any signal-cli processes except our own daemon (by PID).
+-- pkill -f doesn't work on WSL2 (matches process name "java", not cmdline), use pgrep|grep|xargs.
+local function kill_competing(own_pid)
+  local cmd = own_pid
+    and ("pgrep -f signal-cli | grep -v '^" .. own_pid .. "$' | xargs -r kill -9 2>/dev/null")
+    or  "pgrep -f signal-cli | xargs -r kill -9 2>/dev/null"
+  vim.fn.system(cmd)
+end
+
+local function wait_for_socket(account, attempts, own_pid)
   attempts = attempts or 0
   if attempts > 40 then
     state.connecting = false
@@ -83,10 +92,15 @@ local function wait_for_socket(account, attempts)
     end)
     return
   end
+  -- Keep killing competing signal-cli processes every 2.5s so they can't
+  -- hold the config lock while our daemon is starting up.
+  if attempts % 5 == 0 then
+    kill_competing(own_pid)
+  end
   vim.defer_fn(function()
     connect(function(err)
       if err then
-        wait_for_socket(account, attempts + 1)
+        wait_for_socket(account, attempts + 1, own_pid)
       else
         on_connected()
       end
@@ -95,8 +109,11 @@ local function wait_for_socket(account, attempts)
 end
 
 local function spawn_daemon(account)
+  -- Initial kill before spawning — clears the field so daemon can get the lock.
+  kill_competing(nil)
+
   local stderr = vim.loop.new_pipe(false)
-  local proc = vim.loop.spawn(config.get().signal_cmd, {
+  local proc, pid = vim.loop.spawn(config.get().signal_cmd, {
     args  = { "-a", account, "daemon", "--socket",
               "--ignore-attachments", "--ignore-stories",
               "--receive-mode", "on-start" },
@@ -106,7 +123,7 @@ local function spawn_daemon(account)
   end))
   stderr:read_start(function() end)
   state.own_proc = proc
-  wait_for_socket(account)
+  wait_for_socket(account, 0, pid)
 end
 
 function M.call(method, params, callback)
