@@ -82,21 +82,13 @@ local function wait_for_socket(account, attempts)
     end)
     return
   end
-  local f = io.open(SOCKET_PATH, "r")
-  if f then
-    f:close()
-    vim.defer_fn(function()
-      connect(function(err)
-        if err then
-          vim.defer_fn(function() wait_for_socket(account, attempts + 1) end, 500)
-        else
-          on_connected()
-        end
-      end)
-    end, 200)
-  else
-    vim.defer_fn(function() wait_for_socket(account, attempts + 1) end, 500)
-  end
+  connect(function(err)
+    if err then
+      vim.defer_fn(function() wait_for_socket(account, attempts + 1) end, 500)
+    else
+      on_connected()
+    end
+  end)
 end
 
 local function spawn_daemon(account)
