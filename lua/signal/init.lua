@@ -231,10 +231,11 @@ render_list = function()
   local pinned   = vim.tbl_filter(function(c) return  state.pinned[c.id] end, visible)
   local unpinned = vim.tbl_filter(function(c) return not state.pinned[c.id] end, visible)
   local chats    = vim.tbl_filter(function(c) return c.snippet ~= nil and c.snippet ~= "" end, unpinned)
+  local contacts = vim.tbl_filter(function(c) return c.snippet == nil  or c.snippet == "" end, unpinned)
 
-  if #pinned == 0 and #chats == 0 then
-    write_buf({ "", "  No chats yet.", "",
-      "  Send a message from your phone to start a conversation." }, {
+  if #pinned == 0 and #chats == 0 and #contacts == 0 then
+    write_buf({ "", "  No conversations yet.", "",
+      "  Link your device and start chatting from your phone." }, {
       { hl = "SignalLoading", line = 1, col_s = 0, col_e = -1 },
       { hl = "SignalLoading", line = 3, col_s = 0, col_e = -1 },
     })
@@ -245,9 +246,13 @@ render_list = function()
     push_label("Pinned")
     for _, c in ipairs(pinned) do push_conv(c) end
   end
+
   if #chats > 0 then
     if #pinned > 0 then push_gap() end
     for _, c in ipairs(chats) do push_conv(c) end
+  elseif #pinned == 0 then
+    -- No message history yet (linked device limitation) — show contacts as fallback
+    for _, c in ipairs(contacts) do push_conv(c) end
   end
 
   write_buf(lines, specs)
@@ -453,7 +458,6 @@ function M.fetch_and_render()
   local function do_list()
     local contacts_done, groups_done = false, false
     local contacts_data, groups_data
-    local pending_messages = nil
 
     local function try_finish()
       if not contacts_done or not groups_done then return end
@@ -502,11 +506,6 @@ function M.fetch_and_render()
       state.last_sync  = os.time()
       save_conv_cache(convs)
       render_list()
-
-      if pending_messages then
-        require("signal.notifs").process_messages(pending_messages)
-        pending_messages = nil
-      end
     end
 
     cli.list_contacts(state.account, function(err, data)
@@ -525,16 +524,6 @@ function M.fetch_and_render()
       groups_data = (err or type(data) ~= "table") and {} or data
       groups_done = true
       try_finish()
-    end)
-
-    cli.receive(state.account, function(err, messages)
-      if auth_handled then return end
-      if err and config.is_auth_error(err) then handle_auth_error(err) return end
-      if contacts_done and groups_done then
-        require("signal.notifs").process_messages(messages)
-      else
-        pending_messages = messages
-      end
     end)
   end
 
@@ -656,6 +645,10 @@ function M.setup(opts)
   require("signal.highlights").setup()
   package.loaded["signal.notifs"] = nil
   require("signal.notifs").setup()
+  vim.api.nvim_create_autocmd("VimLeavePre", {
+    group    = vim.api.nvim_create_augroup("SignalDaemon", { clear = true }),
+    callback = function() require("signal.daemon").stop() end,
+  })
 end
 
 return M

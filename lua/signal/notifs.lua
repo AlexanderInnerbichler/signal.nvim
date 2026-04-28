@@ -1,12 +1,10 @@
 local M      = {}
-local cli    = require("signal.cli")
 local config = require("signal.config")
 
 local NOTIF_WIDTH  = 55
 local NOTIF_HEIGHT = 3
 
 local state = {
-  timer    = nil,
   seen_ts  = {},
   unread   = {},
   toasts   = {},
@@ -114,8 +112,6 @@ function M.process_messages(messages)
         end
 
         show_toast(name .. ": " .. snippet)
-
-        -- update snippet + persist cache + re-render list
         signal_init.update_snippet(src, snippet, time_str)
       end
     end
@@ -135,11 +131,6 @@ function M.clear_unread(id)
 end
 
 function M.setup()
-  if state.timer then
-    state.timer:close()
-    state.timer = nil
-  end
-
   if config.get().debug then return end
 
   local ok = config.ready()
@@ -147,29 +138,16 @@ function M.setup()
 
   config.resolve_account(function(number)
     if not number then return end
-    local interval = config.get().poll_interval * 1000
-    state.timer = vim.uv.new_timer()
-    state.timer:start(interval, interval, vim.schedule_wrap(function()
-      cli.receive(number, function(err, data)
-        if err then
-          if config.is_auth_error(err) then
-            state.timer:stop()
-            config.invalidate_cache()
-            vim.notify("signal.nvim: not linked — run :SignalSetup to reconnect", vim.log.levels.WARN)
-          end
-          return
-        end
-        M.process_messages(data)
-      end)
-    end))
+    local daemon = require("signal.daemon")
+    daemon.start(number, function(params)
+      -- jsonRpc notification: params = { envelope = {...}, account = "..." }
+      M.process_messages({ params })
+    end)
   end)
 end
 
 function M.stop()
-  if state.timer then
-    state.timer:close()
-    state.timer = nil
-  end
+  require("signal.daemon").stop()
 end
 
 return M
