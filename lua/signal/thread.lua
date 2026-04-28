@@ -405,40 +405,33 @@ function M.refresh()
     return
   end
 
+  local conv = state.conversation
+  if not conv then return end
+
   state.is_loading = true
   render()
 
-  local conv = state.conversation
   cli.list_messages(state.account, conv.id, function(err, data)
-    if err then
-      -- listMessages unsupported — fall back to receive so the button still does something
-      cli.receive(state.account, function(rerr, rdata)
-        local msgs = {}
-        if not rerr and type(rdata) == "table" then
-          for _, item in ipairs(rdata) do
-            local msg = parse_msg(item, state.account)
-            if msg then table.insert(msgs, msg) end
-          end
-        end
-        table.sort(msgs, function(a, b) return (a.timestamp or 0) < (b.timestamp or 0) end)
-        state.messages   = msgs
+    vim.schedule(function()
+      if err then
+        -- listMessages unavailable (signal-cli 0.14.x) — show in-memory messages
+        -- (populated by notifs.append_message when new messages arrive)
         state.is_loading = false
         render()
-      end)
-      return
-    end
-
-    local msgs = {}
-    if type(data) == "table" then
-      for _, item in ipairs(data) do
-        local msg = parse_msg(item, state.account)
-        if msg then table.insert(msgs, msg) end
+        return
       end
-    end
-    table.sort(msgs, function(a, b) return (a.timestamp or 0) < (b.timestamp or 0) end)
-    state.messages   = msgs
-    state.is_loading = false
-    render()
+      local msgs = {}
+      if type(data) == "table" then
+        for _, item in ipairs(data) do
+          local msg = parse_msg(item, state.account)
+          if msg then table.insert(msgs, msg) end
+        end
+      end
+      table.sort(msgs, function(a, b) return (a.timestamp or 0) < (b.timestamp or 0) end)
+      state.messages   = msgs
+      state.is_loading = false
+      render()
+    end)
   end)
 end
 

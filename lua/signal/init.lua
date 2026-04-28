@@ -633,7 +633,9 @@ end
 
 function M.setup(opts)
   config.setup(opts)
+  package.loaded["signal.highlights"] = nil
   require("signal.highlights").setup()
+  package.loaded["signal.notifs"] = nil
   require("signal.notifs").setup()
 end
 
