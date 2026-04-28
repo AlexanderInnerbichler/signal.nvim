@@ -1,34 +1,35 @@
 local M = {}
 
 local function apply()
-  -- dashboard — dark & moody, cool blues/teals
-  vim.api.nvim_set_hl(0, "SignalName",          { fg = "#7aaec4",                bg = "NONE" })  -- unread contact (muted steel blue)
-  vim.api.nvim_set_hl(0, "SignalNameDim",        { fg = "#2e4252",                bg = "NONE" })  -- read contact (dark)
-  vim.api.nvim_set_hl(0, "SignalGroup",          { fg = "#6aaaa6",                bg = "NONE" })  -- unread group (muted teal)
-  vim.api.nvim_set_hl(0, "SignalGroupDim",       { fg = "#263c3a",                bg = "NONE" })  -- read group (very dark)
-  vim.api.nvim_set_hl(0, "SignalPinned",         { fg = "#78a898",                bg = "NONE" })  -- cool sage
-  vim.api.nvim_set_hl(0, "SignalUnread",         { fg = "#5a8ea8",                bg = "NONE" })  -- badge [N]
-  vim.api.nvim_set_hl(0, "SignalSnippet",        { fg = "#3e4a5a",                bg = "NONE" })  -- barely-there snippet
-  vim.api.nvim_set_hl(0, "SignalTime",           { fg = "#283040",                bg = "NONE" })  -- near-invisible time
-  vim.api.nvim_set_hl(0, "SignalTimeHot",        { fg = "#3e6070",                bg = "NONE" })  -- dim blue (today)
-  vim.api.nvim_set_hl(0, "SignalTimeWarm",       { fg = "#344e5c",                bg = "NONE" })  -- slightly dimmer (yesterday)
-  vim.api.nvim_set_hl(0, "SignalDividerBar",     { fg = "#181e28",                bg = "NONE" })  -- near-black rule
-  vim.api.nvim_set_hl(0, "SignalSectionLabel",   { fg = "#2e4252",                bg = "NONE" })  -- dim section text
-  vim.api.nvim_set_hl(0, "SignalLoading",        { fg = "#3e4a5a", italic = true, bg = "NONE" })
+  -- dashboard
+  vim.api.nvim_set_hl(0, "SignalName",          { fg = "#e2e8f0", bold = true,   bg = "NONE" })  -- unread contact (near-white)
+  vim.api.nvim_set_hl(0, "SignalNameDim",        { fg = "#64748b",                bg = "NONE" })  -- read contact (slate)
+  vim.api.nvim_set_hl(0, "SignalGroup",          { fg = "#818cf8", bold = true,   bg = "NONE" })  -- unread group (indigo)
+  vim.api.nvim_set_hl(0, "SignalGroupDim",       { fg = "#374151",                bg = "NONE" })  -- read group (dim)
+  vim.api.nvim_set_hl(0, "SignalPinned",         { fg = "#f59e0b", bold = true,   bg = "NONE" })  -- pinned (amber)
+  vim.api.nvim_set_hl(0, "SignalUnread",         { fg = "#22c55e", bold = true,   bg = "NONE" })  -- unread badge (green)
+  vim.api.nvim_set_hl(0, "SignalUnreadDot",      { fg = "#22c55e",                bg = "NONE" })  -- ● left-edge indicator
+  vim.api.nvim_set_hl(0, "SignalSnippet",        { fg = "#475569",                bg = "NONE" })  -- last message preview
+  vim.api.nvim_set_hl(0, "SignalTime",           { fg = "#334155",                bg = "NONE" })  -- old timestamp
+  vim.api.nvim_set_hl(0, "SignalTimeHot",        { fg = "#38bdf8",                bg = "NONE" })  -- today (sky blue)
+  vim.api.nvim_set_hl(0, "SignalTimeWarm",       { fg = "#a78bfa",                bg = "NONE" })  -- yesterday (violet)
+  vim.api.nvim_set_hl(0, "SignalDividerBar",     { fg = "#1e293b",                bg = "NONE" })  -- thread date separators
+  vim.api.nvim_set_hl(0, "SignalSectionLabel",   { fg = "#475569",                bg = "NONE" })  -- section header (PINNED)
+  vim.api.nvim_set_hl(0, "SignalLoading",        { fg = "#64748b", italic = true, bg = "NONE" })
 
   -- thread
-  vim.api.nvim_set_hl(0, "SignalSenderOther",    { fg = "#7aaec4", bold = true,   bg = "NONE" })  -- steel blue
-  vim.api.nvim_set_hl(0, "SignalSenderSelf",     { fg = "#5a8878", bold = true,   bg = "NONE" })  -- muted teal-green
-  vim.api.nvim_set_hl(0, "SignalMsgBody",        { fg = "#4a5668",                bg = "NONE" })  -- dim body
-  vim.api.nvim_set_hl(0, "SignalReceiptSent",    { fg = "#283040",                bg = "NONE" })  -- invisible
-  vim.api.nvim_set_hl(0, "SignalReceiptRead",    { fg = "#4a7898",                bg = "NONE" })  -- muted blue
+  vim.api.nvim_set_hl(0, "SignalSenderOther",    { fg = "#60a5fa", bold = true,   bg = "NONE" })  -- blue
+  vim.api.nvim_set_hl(0, "SignalSenderSelf",     { fg = "#34d399", bold = true,   bg = "NONE" })  -- emerald
+  vim.api.nvim_set_hl(0, "SignalMsgBody",        { fg = "#94a3b8",                bg = "NONE" })  -- readable body
+  vim.api.nvim_set_hl(0, "SignalReceiptSent",    { fg = "#334155",                bg = "NONE" })  -- dim
+  vim.api.nvim_set_hl(0, "SignalReceiptRead",    { fg = "#60a5fa",                bg = "NONE" })  -- blue (matches sender)
 
   -- setup wizard
-  vim.api.nvim_set_hl(0, "SignalSetupCmd",       { fg = "#3e4a5a", italic = true, bg = "NONE" })
-  vim.api.nvim_set_hl(0, "SignalSetupOk",        { fg = "#5a8878", bold = true,   bg = "NONE" })
-  vim.api.nvim_set_hl(0, "SignalSetupErr",       { fg = "#805868", bold = true,   bg = "NONE" })
-  vim.api.nvim_set_hl(0, "SignalSetupUrl",       { fg = "#5a8ea8",                bg = "NONE" })
-  vim.api.nvim_set_hl(0, "SignalSetupDim",       { fg = "#3e4a5a",                bg = "NONE" })
+  vim.api.nvim_set_hl(0, "SignalSetupCmd",       { fg = "#64748b", italic = true, bg = "NONE" })
+  vim.api.nvim_set_hl(0, "SignalSetupOk",        { fg = "#34d399", bold = true,   bg = "NONE" })
+  vim.api.nvim_set_hl(0, "SignalSetupErr",       { fg = "#f87171", bold = true,   bg = "NONE" })
+  vim.api.nvim_set_hl(0, "SignalSetupUrl",       { fg = "#60a5fa",                bg = "NONE" })
+  vim.api.nvim_set_hl(0, "SignalSetupDim",       { fg = "#475569",                bg = "NONE" })
 end
 
 function M.setup()

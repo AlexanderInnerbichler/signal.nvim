@@ -6,16 +6,21 @@ local ns = vim.api.nvim_create_namespace("Signal")
 
 local PIN_FILE = vim.fn.expand("~/.local/share/signal-cli/nvim-pinned.json")
 
+local SPINNER = { "⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏" }
+
 local state = {
   buf            = nil,
   win            = nil,
   conversations  = {},
   is_loading     = false,
+  auth_error     = false,
   account        = nil,
   line_conv_map  = {},
   filter         = "",
   pinned         = {},
   last_sync      = nil,
+  spinner_timer  = nil,
+  spinner_frame  = 1,
 }
 
 local function load_pins()
@@ -57,7 +62,28 @@ local function write_buf(lines, hl_specs)
   end
 end
 
-local function render_list()
+local render_list  -- forward declaration for spinner callback
+
+local function start_spinner()
+  if state.spinner_timer then return end
+  state.spinner_frame = 1
+  state.spinner_timer = vim.uv.new_timer()
+  state.spinner_timer:start(0, 80, vim.schedule_wrap(function()
+    if not is_valid() then return end
+    state.spinner_frame = (state.spinner_frame % #SPINNER) + 1
+    render_list()
+  end))
+end
+
+local function stop_spinner()
+  if state.spinner_timer then
+    state.spinner_timer:stop()
+    state.spinner_timer:close()
+    state.spinner_timer = nil
+  end
+end
+
+render_list = function()
   if not is_valid() then return end
 
   local total_unread = 0
@@ -78,21 +104,21 @@ local function render_list()
   })
 
   if state.is_loading then
-    write_buf({ "", "  Loading…" }, { { hl = "SignalLoading", line = 1, col_s = 0, col_e = -1 } })
+    local frame = SPINNER[state.spinner_frame] or "⠋"
+    write_buf({ "", "  " .. frame .. "  Syncing…" },
+      { { hl = "SignalLoading", line = 1, col_s = 0, col_e = -1 } })
     return
   end
 
-  if #state.conversations == 0 then
+  if state.auth_error then
     write_buf({
       "",
-      "  No conversations yet.",
+      "  Not linked to Signal.",
       "",
-      "  Start a chat from your phone —",
-      "  it will appear here automatically.",
+      "  Run :SignalSetup to reconnect.",
     }, {
       { hl = "SignalLoading", line = 1, col_s = 0, col_e = -1 },
       { hl = "SignalLoading", line = 3, col_s = 0, col_e = -1 },
-      { hl = "SignalLoading", line = 4, col_s = 0, col_e = -1 },
     })
     return
   end
@@ -102,21 +128,15 @@ local function render_list()
   local specs         = {}
   state.line_conv_map = {}
 
-  local function push_divider(label)
-    local available = win_width - #label - 8
-    local bar_l     = string.rep("─", math.max(2, math.floor(available / 2)))
-    local bar_r     = string.rep("─", math.max(2, available - math.floor(available / 2)))
-    local line      = "  " .. bar_l .. "  " .. label .. "  " .. bar_r
-    local lnum      = #lines
-    local label_s   = 2 + #bar_l + 2
-    local label_e   = label_s + #label
-
-    table.insert(lines, line)
+  local function push_label(label)
+    local lnum = #lines
+    table.insert(lines, "  " .. label:upper())
     table.insert(lines, "")
+    table.insert(specs, { hl = "SignalSectionLabel", line = lnum, col_s = 0, col_e = -1 })
+  end
 
-    table.insert(specs, { hl = "SignalDividerBar",   line = lnum, col_s = 0,       col_e = label_s })
-    table.insert(specs, { hl = "SignalSectionLabel", line = lnum, col_s = label_s, col_e = label_e })
-    table.insert(specs, { hl = "SignalDividerBar",   line = lnum, col_s = label_e, col_e = -1      })
+  local function push_gap()
+    table.insert(lines, "")
   end
 
   local function time_hl(timestr)
@@ -132,14 +152,15 @@ local function render_list()
     local icon       = c.kind == "group" and "  " or "  "
     local name       = c.name or c.id or "Unknown"
     local snippet    = c.snippet or ""
-    local badge      = has_unread and (" [" .. c.unread .. "]") or ""
+    local badge      = has_unread and (" " .. c.unread) or ""
     local timestr    = (c.time or "") .. badge
 
-    -- prefix: 2 spaces + icon (3-byte nerd font + 2 spaces) = 7 bytes, ~6 display cols
-    local prefix = "  " .. icon
+    -- col 0-1: green dot for unread, blank otherwise; then icon
+    local dot    = has_unread and "● " or "  "
+    local prefix = dot .. icon
     local gap    = math.max(1, win_width - 6 - #name - #timestr - 2)
     local line1  = prefix .. name .. string.rep(" ", gap) .. timestr
-    local line2  = "      " .. snippet:sub(1, win_width - 8)
+    local line2  = "  " .. icon .. " " .. snippet:sub(1, win_width - 8)
 
     local name_lnum    = #lines
     local snippet_lnum = #lines + 1
@@ -149,7 +170,12 @@ local function render_list()
     state.line_conv_map[name_lnum + 1]    = c
     state.line_conv_map[snippet_lnum + 1] = c
 
-    -- icon: always dim, type-specific
+    -- unread dot
+    if has_unread then
+      table.insert(specs, { hl = "SignalUnreadDot", line = name_lnum, col_s = 0, col_e = 2 })
+    end
+
+    -- icon: dim, type-specific
     local icon_hl = c.kind == "group" and "SignalGroupDim" or "SignalNameDim"
     table.insert(specs, { hl = icon_hl, line = name_lnum, col_s = 2, col_e = 2 + #icon })
 
@@ -173,6 +199,12 @@ local function render_list()
   end
 
   local visible = state.conversations
+
+  -- only active chats (at least one message)
+  visible = vim.tbl_filter(function(c)
+    return c.snippet ~= nil and c.snippet ~= ""
+  end, visible)
+
   if state.filter ~= "" then
     local q = state.filter:lower()
     visible = vim.tbl_filter(function(c)
@@ -180,13 +212,32 @@ local function render_list()
     end, visible)
   end
 
-  local pinned   = vim.tbl_filter(function(c) return state.pinned[c.id] end, visible)
-  local contacts = vim.tbl_filter(function(c) return c.kind ~= "group" and not state.pinned[c.id] end, visible)
-  local groups   = vim.tbl_filter(function(c) return c.kind == "group"  and not state.pinned[c.id] end, visible)
+  if #visible == 0 then
+    write_buf({
+      "",
+      "  No active chats.",
+      "",
+      "  Start a conversation from your phone —",
+      "  it will appear here automatically.",
+    }, {
+      { hl = "SignalLoading", line = 1, col_s = 0, col_e = -1 },
+      { hl = "SignalLoading", line = 3, col_s = 0, col_e = -1 },
+      { hl = "SignalLoading", line = 4, col_s = 0, col_e = -1 },
+    })
+    return
+  end
 
-  if #pinned   > 0 then push_divider("Pinned")   for _, c in ipairs(pinned)   do push_conv(c) end end
-  if #contacts > 0 then push_divider("Contacts") for _, c in ipairs(contacts) do push_conv(c) end end
-  if #groups   > 0 then push_divider("Groups")   for _, c in ipairs(groups)   do push_conv(c) end end
+  local pinned = vim.tbl_filter(function(c) return state.pinned[c.id] end, visible)
+  local active = vim.tbl_filter(function(c) return not state.pinned[c.id] end, visible)
+
+  if #pinned > 0 then
+    push_label("Pinned")
+    for _, c in ipairs(pinned) do push_conv(c) end
+  end
+  if #active > 0 then
+    if #pinned > 0 then push_gap() end
+    for _, c in ipairs(active) do push_conv(c) end
+  end
 
   write_buf(lines, specs)
 end
@@ -362,51 +413,81 @@ function M.fetch_and_render()
   end
 
   state.is_loading = true
-  render_list()
+  state.auth_error = false
+  start_spinner()
 
-  local contacts_done, groups_done = false, false
-  local contacts_data, groups_data
+  local auth_handled = false
 
-  local function try_finish()
-    if not contacts_done or not groups_done then return end
-    local convs = {}
-    for _, c in ipairs(contacts_data or {}) do
-      local name = (c.name and c.name ~= "") and c.name or c.number or "Unknown"
-      table.insert(convs, {
-        id      = c.number,
-        name    = name,
-        kind    = "contact",
-        snippet = "",
-        time    = "",
-        unread  = require("signal.notifs").get_unread(c.number),
-      })
-    end
-    for _, g in ipairs(groups_data or {}) do
-      table.insert(convs, {
-        id      = g.id,
-        name    = g.name or "Group",
-        kind    = "group",
-        snippet = "",
-        time    = "",
-        unread  = require("signal.notifs").get_unread(g.id),
-      })
-    end
-    state.conversations = convs
-    state.is_loading    = false
-    state.last_sync     = os.time()
+  local function handle_auth_error(err)
+    if auth_handled then return end
+    auth_handled = true
+    config.invalidate_cache()
+    stop_spinner()
+    state.is_loading = false
+    state.auth_error = true
     render_list()
+    vim.notify("signal.nvim: not linked — run :SignalSetup to reconnect\n" .. (err or ""), vim.log.levels.WARN)
   end
 
-  cli.list_contacts(state.account, function(err, data)
-    contacts_data = (err or type(data) ~= "table") and {} or data
-    contacts_done = true
-    try_finish()
-  end)
+  local function do_list()
+    local contacts_done, groups_done = false, false
+    local contacts_data, groups_data
 
-  cli.list_groups(state.account, function(err, data)
-    groups_data = (err or type(data) ~= "table") and {} or data
-    groups_done = true
-    try_finish()
+    local function try_finish()
+      if not contacts_done or not groups_done then return end
+      local convs = {}
+      for _, c in ipairs(contacts_data or {}) do
+        local name = (c.name and c.name ~= "") and c.name or c.number or "Unknown"
+        table.insert(convs, {
+          id      = c.number,
+          name    = name,
+          kind    = "contact",
+          snippet = "",
+          time    = "",
+          unread  = require("signal.notifs").get_unread(c.number),
+        })
+      end
+      for _, g in ipairs(groups_data or {}) do
+        table.insert(convs, {
+          id      = g.id,
+          name    = g.name or "Group",
+          kind    = "group",
+          snippet = "",
+          time    = "",
+          unread  = require("signal.notifs").get_unread(g.id),
+        })
+      end
+      state.conversations = convs
+      stop_spinner()
+      state.is_loading    = false
+      state.last_sync     = os.time()
+      render_list()
+    end
+
+    cli.list_contacts(state.account, function(err, data)
+      if auth_handled then return end
+      if err and config.is_auth_error(err) then handle_auth_error(err) return end
+      if err then vim.notify("signal.nvim: listContacts: " .. err, vim.log.levels.WARN) end
+      contacts_data = (err or type(data) ~= "table") and {} or data
+      contacts_done = true
+      try_finish()
+    end)
+
+    cli.list_groups(state.account, function(err, data)
+      if auth_handled then return end
+      if err and config.is_auth_error(err) then handle_auth_error(err) return end
+      if err then vim.notify("signal.nvim: listGroups: " .. err, vim.log.levels.WARN) end
+      groups_data = (err or type(data) ~= "table") and {} or data
+      groups_done = true
+      try_finish()
+    end)
+  end
+
+  -- receive first so signal-cli syncs contacts/groups from the server into its local DB
+  cli.receive(state.account, function(err, _)
+    if auth_handled then return end
+    if err and config.is_auth_error(err) then handle_auth_error(err) return end
+    do_list()
   end)
 end
 
@@ -457,6 +538,7 @@ function M.return_to_list()
 end
 
 function M.close()
+  stop_spinner()
   if state.win and vim.api.nvim_win_is_valid(state.win) then
     vim.api.nvim_win_close(state.win, true)
     state.win = nil
