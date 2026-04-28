@@ -231,11 +231,10 @@ render_list = function()
   local pinned   = vim.tbl_filter(function(c) return  state.pinned[c.id] end, visible)
   local unpinned = vim.tbl_filter(function(c) return not state.pinned[c.id] end, visible)
   local chats    = vim.tbl_filter(function(c) return c.snippet ~= nil and c.snippet ~= "" end, unpinned)
-  local contacts = vim.tbl_filter(function(c) return c.snippet == nil  or c.snippet == "" end, unpinned)
 
-  if #pinned == 0 and #chats == 0 and #contacts == 0 then
-    write_buf({ "", "  No conversations yet.", "",
-      "  Link your device and start chatting from your phone." }, {
+  if #pinned == 0 and #chats == 0 then
+    write_buf({ "", "  No chats yet.", "",
+      "  Send a message from your phone to start a conversation." }, {
       { hl = "SignalLoading", line = 1, col_s = 0, col_e = -1 },
       { hl = "SignalLoading", line = 3, col_s = 0, col_e = -1 },
     })
@@ -249,11 +248,6 @@ render_list = function()
   if #chats > 0 then
     if #pinned > 0 then push_gap() end
     for _, c in ipairs(chats) do push_conv(c) end
-  end
-  if #contacts > 0 then
-    if #chats > 0 or #pinned > 0 then push_gap() end
-    push_label("Contacts")
-    for _, c in ipairs(contacts) do push_conv(c) end
   end
 
   write_buf(lines, specs)
