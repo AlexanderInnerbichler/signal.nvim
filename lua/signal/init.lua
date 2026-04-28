@@ -30,6 +30,13 @@ end
 
 local SPINNER = { "⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏" }
 
+local SPRITE_FRAMES = {
+  { "▄██▄", "▐██▌", "▀▀▀▀" },
+  { "▄██▄", "████", "▀▀▀▀" },
+  { "▄██▄", "▐██▌", "▀▄▄▄" },
+  { "▄██▄", "████", "▀▀▀▀" },
+}
+
 local state = {
   buf            = nil,
   win            = nil,
@@ -44,6 +51,9 @@ local state = {
   spinner_timer  = nil,
   spinner_frame  = 1,
   profile        = nil,
+  sprite_frame   = 1,
+  sprite_timer   = nil,
+  in_list        = false,
 }
 
 local function load_pins()
@@ -106,8 +116,27 @@ local function stop_spinner()
   end
 end
 
+local function start_sprite_anim()
+  if state.sprite_timer then return end
+  state.sprite_timer = vim.uv.new_timer()
+  state.sprite_timer:start(300, 300, vim.schedule_wrap(function()
+    if not is_valid() or not state.in_list then return end
+    state.sprite_frame = (state.sprite_frame % #SPRITE_FRAMES) + 1
+    render_list()
+  end))
+end
+
+local function stop_sprite_anim()
+  if state.sprite_timer then
+    state.sprite_timer:stop()
+    state.sprite_timer:close()
+    state.sprite_timer = nil
+  end
+end
+
 render_list = function()
   if not is_valid() then return end
+  if not state.in_list then return end
 
   local total_unread = 0
   for _, c in ipairs(state.conversations) do
@@ -131,20 +160,35 @@ render_list = function()
   local specs         = {}
   state.line_conv_map = {}
 
-  -- Profile header (always visible, even while loading or on auth error)
+  -- Animated sprite header (always visible, even while loading or on auth error)
   if state.account then
-    local prof    = state.profile or {}
-    local name    = (prof.name and prof.name ~= "") and prof.name or state.account
-    local name_ln = #lines
-    table.insert(lines, "  󰀄  " .. name)
-    table.insert(specs, { hl = "SignalName", line = name_ln, col_s = 0, col_e = -1 })
-    local detail_ln = #lines
-    local detail    = "  " .. state.account
+    local prof   = state.profile or {}
+    local name   = (prof.name and prof.name ~= "") and prof.name or state.account
+    local detail = state.account
     if prof.about and prof.about ~= "" then
       detail = detail .. "  ·  " .. prof.about
     end
-    table.insert(lines, detail)
-    table.insert(specs, { hl = "SignalSnippet", line = detail_ln, col_s = 0, col_e = -1 })
+
+    local fr  = SPRITE_FRAMES[state.sprite_frame or 1]
+    local gap = "   "
+
+    -- each block char = 3 bytes; "▄██▄" = 12 bytes; indent(2)+sprite(12)+gap(3) = 17
+    local r1_pre = "  " .. fr[1] .. gap
+    local r1_ln  = #lines
+    table.insert(lines, r1_pre .. name)
+    table.insert(specs, { hl = "SignalSprite", line = r1_ln, col_s = 2,       col_e = 14 })
+    table.insert(specs, { hl = "SignalName",   line = r1_ln, col_s = #r1_pre, col_e = -1 })
+
+    local r2_pre = "  " .. fr[2] .. gap
+    local r2_ln  = #lines
+    table.insert(lines, r2_pre .. detail)
+    table.insert(specs, { hl = "SignalSprite",  line = r2_ln, col_s = 2,       col_e = 14 })
+    table.insert(specs, { hl = "SignalSnippet", line = r2_ln, col_s = #r2_pre, col_e = -1 })
+
+    local r3_ln = #lines
+    table.insert(lines, "  " .. fr[3])
+    table.insert(specs, { hl = "SignalSprite", line = r3_ln, col_s = 2, col_e = -1 })
+
     local sep_ln = #lines
     table.insert(lines, "  " .. string.rep("─", math.max(2, win_width - 4)))
     table.insert(specs, { hl = "SignalTime", line = sep_ln, col_s = 0, col_e = -1 })
@@ -414,6 +458,7 @@ function M.register_keymaps()
     local cur  = vim.api.nvim_win_get_cursor(state.win)[1]
     local conv = state.line_conv_map[cur]
     if conv then
+      state.in_list = false
       require("signal.notifs").clear_unread(conv.id)
       conv.unread = 0
       require("signal.thread").open(conv, state.account, state.buf, state.win)
@@ -632,7 +677,8 @@ local function open_win()
 end
 
 function M.return_to_list()
-  state.filter = ""
+  state.in_list = true
+  state.filter  = ""
   for _, c in ipairs(state.conversations) do
     c.unread = require("signal.notifs").get_unread(c.id)
   end
@@ -641,6 +687,8 @@ function M.return_to_list()
 end
 
 function M.close()
+  state.in_list = false
+  stop_sprite_anim()
   stop_spinner()
   if state.win and vim.api.nvim_win_is_valid(state.win) then
     vim.api.nvim_win_close(state.win, true)
@@ -653,6 +701,8 @@ function M.open()
   if config.get().debug then
     state.account = "+43000000000"
     open_win()
+    state.in_list = true
+    start_sprite_anim()
     M.register_keymaps()
     M.fetch_and_render()
     return
@@ -669,6 +719,8 @@ function M.open()
     end
     state.account = number
     open_win()
+    state.in_list = true
+    start_sprite_anim()
     M.register_keymaps()
     M.fetch_and_render()
   end)

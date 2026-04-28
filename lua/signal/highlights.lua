@@ -24,6 +24,7 @@ local function apply()
   vim.api.nvim_set_hl(0, "SignalReceiptSent",    { fg = "#334155",                bg = "NONE" })  -- dim
   vim.api.nvim_set_hl(0, "SignalReceiptRead",    { fg = "#60a5fa",                bg = "NONE" })  -- blue (matches sender)
   vim.api.nvim_set_hl(0, "SignalReaction",       { fg = "#a78bfa",                bg = "NONE" })  -- violet
+  vim.api.nvim_set_hl(0, "SignalSprite",         { fg = "#818cf8", bold = true,   bg = "NONE" })  -- indigo
 
   -- setup wizard
   vim.api.nvim_set_hl(0, "SignalSetupCmd",       { fg = "#64748b", italic = true, bg = "NONE" })
