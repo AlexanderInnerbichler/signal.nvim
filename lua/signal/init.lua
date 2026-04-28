@@ -221,11 +221,6 @@ render_list = function()
 
   local visible = state.conversations
 
-  -- only active chats (at least one message)
-  visible = vim.tbl_filter(function(c)
-    return c.snippet ~= nil and c.snippet ~= ""
-  end, visible)
-
   if state.filter ~= "" then
     local q = state.filter:lower()
     visible = vim.tbl_filter(function(c)
@@ -233,31 +228,32 @@ render_list = function()
     end, visible)
   end
 
-  if #visible == 0 then
-    write_buf({
-      "",
-      "  No active chats.",
-      "",
-      "  Start a conversation from your phone —",
-      "  it will appear here automatically.",
-    }, {
+  local pinned   = vim.tbl_filter(function(c) return  state.pinned[c.id] end, visible)
+  local unpinned = vim.tbl_filter(function(c) return not state.pinned[c.id] end, visible)
+  local chats    = vim.tbl_filter(function(c) return c.snippet ~= nil and c.snippet ~= "" end, unpinned)
+  local contacts = vim.tbl_filter(function(c) return c.snippet == nil  or c.snippet == "" end, unpinned)
+
+  if #pinned == 0 and #chats == 0 and #contacts == 0 then
+    write_buf({ "", "  No conversations yet.", "",
+      "  Link your device and start chatting from your phone." }, {
       { hl = "SignalLoading", line = 1, col_s = 0, col_e = -1 },
       { hl = "SignalLoading", line = 3, col_s = 0, col_e = -1 },
-      { hl = "SignalLoading", line = 4, col_s = 0, col_e = -1 },
     })
     return
   end
-
-  local pinned = vim.tbl_filter(function(c) return state.pinned[c.id] end, visible)
-  local active = vim.tbl_filter(function(c) return not state.pinned[c.id] end, visible)
 
   if #pinned > 0 then
     push_label("Pinned")
     for _, c in ipairs(pinned) do push_conv(c) end
   end
-  if #active > 0 then
+  if #chats > 0 then
     if #pinned > 0 then push_gap() end
-    for _, c in ipairs(active) do push_conv(c) end
+    for _, c in ipairs(chats) do push_conv(c) end
+  end
+  if #contacts > 0 then
+    if #chats > 0 or #pinned > 0 then push_gap() end
+    push_label("Contacts")
+    for _, c in ipairs(contacts) do push_conv(c) end
   end
 
   write_buf(lines, specs)
