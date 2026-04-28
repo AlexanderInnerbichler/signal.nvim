@@ -115,6 +115,26 @@ function M.process_messages(messages)
         signal_init.update_snippet(src, snippet, time_str)
       end
     end
+
+    -- Sent message sync: messages you sent from your phone
+    local raw_env = envelope.envelope or envelope
+    local sync    = raw_env.syncMessage
+    local sm      = sync and sync.sentMessage
+    if sm and sm.message then
+      local dest_id
+      if sm.groupInfo then
+        dest_id = sm.groupInfo.groupId
+      else
+        dest_id = sm.destinationNumber or sm.destination
+      end
+      local sm_ts = sm.timestamp or 0
+      if dest_id and sm_ts > (state.seen_ts[dest_id] or 0) then
+        state.seen_ts[dest_id] = sm_ts
+        local snippet  = sm.message:sub(1, 40)
+        local time_str = fmt_ts(sm_ts)
+        signal_init.update_snippet(dest_id, snippet, time_str)
+      end
+    end
   end
 end
 
@@ -140,9 +160,12 @@ function M.setup()
     if not number then return end
     local daemon = require("signal.daemon")
     daemon.start(number, function(params)
-      -- jsonRpc notification: params = { envelope = {...}, account = "..." }
       M.process_messages({ params })
     end)
+    -- Ask primary device to resend recent sent-message sync data after JVM starts
+    vim.defer_fn(function()
+      daemon.call("sendSyncRequest", {}, function() end)
+    end, 8000)
   end)
 end
 
