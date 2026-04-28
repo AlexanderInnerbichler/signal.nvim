@@ -37,6 +37,7 @@ local FOOTERS = {
   phone   = " <C-s> continue  ·  q cancel ",
   captcha = " <C-s> retry  ·  q cancel ",
   sms     = " <C-s> verify  ·  q cancel ",
+  linking = " waiting for phone scan… ",
   done    = " q close ",
   error   = " q close ",
 }
@@ -385,7 +386,225 @@ function M.handle_sms(code)
   end)
 end
 
+-- ── link flow ─────────────────────────────────────────────────────────────────
+
+local QRPY = table.concat({
+  "import sys,io",
+  "uri=sys.stdin.read().strip()",
+  "try:",
+  "  import qrcode",
+  "  q=qrcode.QRCode(border=1,error_correction=qrcode.constants.ERROR_CORRECT_L)",
+  "  q.add_data(uri)",
+  "  q.make(fit=True)",
+  "  f=io.StringIO()",
+  "  q.print_ascii(out=f,invert=True)",
+  "  print(f.getvalue().rstrip('\\n'))",
+  "except ImportError:",
+  "  print('NOQR')",
+}, "\n")
+
+local function cleanup_broken_accounts(callback)
+  local data_dir  = vim.fn.expand("~/.local/share/signal-cli/data")
+  local idx_path  = data_dir .. "/accounts.json"
+
+  local f = io.open(idx_path, "r")
+  if not f then callback() return end
+  local raw = f:read("*a")
+  f:close()
+
+  local ok, idx = pcall(vim.fn.json_decode, raw)
+  if not ok or type(idx) ~= "table" or type(idx.accounts) ~= "table" then
+    callback()
+    return
+  end
+
+  local clean = {}
+  for _, acc in ipairs(idx.accounts) do
+    -- signal-cli stores account data at <data_dir>/<path> (no extension)
+    local acc_file = data_dir .. "/" .. acc.path
+    local af       = io.open(acc_file, "r")
+    local broken   = false
+    if af then
+      local araw = af:read("*a")
+      af:close()
+      local aok, adata = pcall(vim.fn.json_decode, araw)
+      if aok and type(adata) == "table" and adata.registered == false then
+        broken = true
+      end
+    end
+    if broken then
+      os.remove(acc_file)
+      vim.fn.delete(data_dir .. "/" .. acc.path .. ".d", "rf")
+      config.invalidate_cache()
+      log("info", "Removed stale account: " .. (acc.number or acc.path))
+    else
+      table.insert(clean, acc)
+    end
+  end
+
+  idx.accounts = clean
+  local wf = io.open(idx_path, "w")
+  if wf then
+    wf:write(vim.fn.json_encode(idx))
+    wf:close()
+  end
+
+  callback()
+end
+
+local function do_link()
+  state.step = "linking"
+  set_footer("linking")
+
+  local cmd        = config.get().signal_cmd
+  local args       = { cmd, "link", "-n", "signal.nvim" }
+  local uri_shown  = false
+  local stream_buf = ""
+
+  local function on_linked(result)
+    -- listAccounts is ground truth — signal-cli link exits non-zero even on success
+    vim.system({ cmd, "--output=json", "listAccounts" }, { text = true }, function(r2)
+      vim.schedule(function()
+        local number
+        if r2.code == 0 and r2.stdout and r2.stdout ~= "" then
+          local ok, data = pcall(vim.fn.json_decode, r2.stdout)
+          if ok and type(data) == "table" then
+            for _, acc in ipairs(data) do
+              if acc.number and acc.number ~= "" then
+                number = acc.number
+                break
+              end
+            end
+          end
+        end
+
+        state.log = {}
+        if number then
+          local f = io.open(config.ACCOUNT_CACHE, "w")
+          if f then f:write(number) f:close() end
+          log("ok",   "Linked as " .. number .. "!")
+          log("info", "Close this window and run :Signal")
+          state.step = "done"
+          set_footer("done")
+        else
+          local stderr = vim.trim(result.stderr or "")
+          log("err",  stderr ~= "" and stderr or "Link failed — no account registered.")
+          log("info", "Run :SignalLink to try again.")
+          state.step = "error"
+          set_footer("error")
+        end
+      end)
+    end)
+  end
+
+  local function show_qr(uri)
+    vim.system({ "python3", "-c", QRPY }, { text = true, stdin = uri }, function(r)
+      vim.schedule(function()
+        local has_qr = r.code == 0 and (r.stdout or ""):find("█")
+        state.log    = {}
+
+        if has_qr then
+          local qr_lines = vim.split(vim.trim(r.stdout), "\n", { plain = true })
+          local qr_w     = 0
+          for _, l in ipairs(qr_lines) do
+            qr_w = math.max(qr_w, vim.fn.strdisplaywidth(l))
+          end
+          local new_w = math.max(qr_w + 6, 54)
+          local new_h = #qr_lines + 8
+          local ui    = vim.api.nvim_list_uis()[1] or { width = 180, height = 50 }
+          if state.win and vim.api.nvim_win_is_valid(state.win) then
+            pcall(vim.api.nvim_win_set_config, state.win, {
+              relative = "editor",
+              width    = new_w,
+              height   = new_h,
+              row      = math.floor((ui.height - new_h) / 2),
+              col      = math.floor((ui.width  - new_w) / 2),
+            })
+          end
+          local pad = string.rep(" ", math.max(0, math.floor((new_w - qr_w) / 2)))
+          log("blank", "")
+          log("info",  "Signal → Settings → Linked Devices → Link New Device")
+          log("blank", "")
+          for _, l in ipairs(qr_lines) do
+            log("blank", pad .. l)
+          end
+          log("blank", "")
+          log("info",  "Waiting for scan…")
+        else
+          if state.win and vim.api.nvim_win_is_valid(state.win) then
+            vim.wo[state.win].wrap = true
+            local ui = vim.api.nvim_list_uis()[1] or { width = 180, height = 50 }
+            local w  = math.min(80, ui.width - 4)
+            pcall(vim.api.nvim_win_set_config, state.win, {
+              relative = "editor",
+              width    = w,
+              height   = H,
+              row      = math.floor((ui.height - H) / 2),
+              col      = math.floor((ui.width  - w)  / 2),
+            })
+          end
+          log("blank", "")
+          log("info",  "Signal → Settings → Linked Devices → Link New Device")
+          log("info",  "Scan this URI:")
+          log("blank", "")
+          log("url",   uri)
+          log("blank", "")
+          log("info",  "Waiting for scan…")
+        end
+      end)
+    end)
+  end
+
+  local scanned = false
+  local function try_capture(chunk)
+    if not chunk or chunk == "" then return end
+    stream_buf = stream_buf .. chunk
+
+    if not uri_shown then
+      local uri = stream_buf:match("(sgnl://[^\r\n]+)")
+               or stream_buf:match("(tsdevice:/?[^\r\n]+)")
+      if uri then
+        uri_shown = true
+        vim.schedule(function() show_qr(uri) end)
+      end
+    elseif not scanned then
+      scanned = true
+      vim.schedule(function()
+        if state.win and vim.api.nvim_win_is_valid(state.win) then
+          pcall(vim.api.nvim_win_set_config, state.win, {
+            footer     = " scanned — finalizing… ",
+            footer_pos = "center",
+          })
+        end
+      end)
+    end
+  end
+
+  vim.system(args, {
+    text   = true,
+    stdout = function(_, data) try_capture(data) end,
+    stderr = function(_, data) try_capture(data) end,
+  }, function(result)
+    vim.schedule(function() on_linked(result) end)
+  end)
+end
+
 -- ── entry point ───────────────────────────────────────────────────────────────
+
+function M.link()
+  local ok, err = config.ready()
+  if not ok then
+    vim.notify("signal.nvim: " .. err, vim.log.levels.ERROR)
+    return
+  end
+  close()
+  open_window()
+  log("info", "Preparing link…")
+  cleanup_broken_accounts(function()
+    log("info", "Generating link code…")
+    do_link()
+  end)
+end
 
 function M.run()
   local ok, err = config.ready()

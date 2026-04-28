@@ -348,6 +348,48 @@ local DEBUG_THREADS = {
   },
 }
 
+local function parse_msg(item, account)
+  local env  = item.envelope or item
+  local dm   = env.dataMessage
+  local sync = env.syncMessage
+  local src  = env.source
+
+  if dm and dm.message then
+    return {
+      source      = src,
+      message     = dm.message,
+      timestamp   = dm.timestamp or env.timestamp or 0,
+      attachments = dm.attachments and #dm.attachments > 0,
+    }
+  end
+
+  if sync and sync.sentMessage and sync.sentMessage.message then
+    local sm = sync.sentMessage
+    return {
+      source      = account,
+      message     = sm.message,
+      timestamp   = sm.timestamp or 0,
+      attachments = sm.attachments and #sm.attachments > 0,
+      status      = "sent",
+    }
+  end
+end
+
+function M.get_current_conv_id()
+  return state.conversation and state.conversation.id
+end
+
+function M.append_message(msg)
+  if not state.conversation then return end
+  local ts = msg.timestamp or 0
+  for _, m in ipairs(state.messages) do
+    if m.timestamp == ts and m.source == msg.source then return end
+  end
+  table.insert(state.messages, msg)
+  table.sort(state.messages, function(a, b) return (a.timestamp or 0) < (b.timestamp or 0) end)
+  render()
+end
+
 function M.refresh()
   if config.get().debug then
     local conv_id = state.conversation and state.conversation.id
@@ -365,27 +407,32 @@ function M.refresh()
 
   state.is_loading = true
   render()
-  cli.receive(state.account, function(err, data)
+
+  local conv = state.conversation
+  cli.list_messages(state.account, conv.id, function(err, data)
     if err then
-      vim.notify("signal.nvim: receive error: " .. err, vim.log.levels.WARN)
-      state.is_loading = false
-      render()
+      -- listMessages unsupported — fall back to receive so the button still does something
+      cli.receive(state.account, function(rerr, rdata)
+        local msgs = {}
+        if not rerr and type(rdata) == "table" then
+          for _, item in ipairs(rdata) do
+            local msg = parse_msg(item, state.account)
+            if msg then table.insert(msgs, msg) end
+          end
+        end
+        table.sort(msgs, function(a, b) return (a.timestamp or 0) < (b.timestamp or 0) end)
+        state.messages   = msgs
+        state.is_loading = false
+        render()
+      end)
       return
     end
+
     local msgs = {}
     if type(data) == "table" then
-      for _, envelope in ipairs(data) do
-        local dm  = envelope.dataMessage
-          or (envelope.envelope and envelope.envelope.dataMessage)
-        local src = envelope.source
-          or (envelope.envelope and envelope.envelope.source)
-        if dm and dm.message then
-          table.insert(msgs, {
-            source    = src,
-            message   = dm.message,
-            timestamp = dm.timestamp or envelope.timestamp or 0,
-          })
-        end
+      for _, item in ipairs(data) do
+        local msg = parse_msg(item, state.account)
+        if msg then table.insert(msgs, msg) end
       end
     end
     table.sort(msgs, function(a, b) return (a.timestamp or 0) < (b.timestamp or 0) end)

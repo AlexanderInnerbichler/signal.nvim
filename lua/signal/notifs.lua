@@ -94,6 +94,11 @@ local function process_messages(messages)
           end
         end
 
+        local thread = require("signal.thread")
+        if thread.get_current_conv_id() == src then
+          thread.append_message({ source = src, message = dm.message, timestamp = ts })
+        end
+
         show_toast(name .. ": " .. dm.message:sub(1, 40))
 
         if main_state.win and vim.api.nvim_win_is_valid(main_state.win) then
@@ -134,7 +139,14 @@ function M.setup()
     state.timer = vim.uv.new_timer()
     state.timer:start(interval, interval, vim.schedule_wrap(function()
       cli.receive(number, function(err, data)
-        if err or not data then return end
+        if err then
+          if config.is_auth_error(err) then
+            state.timer:stop()
+            config.invalidate_cache()
+            vim.notify("signal.nvim: not linked — run :SignalSetup to reconnect", vim.log.levels.WARN)
+          end
+          return
+        end
         process_messages(data)
       end)
     end))

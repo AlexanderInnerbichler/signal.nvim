@@ -53,6 +53,11 @@ function M.list_groups(number, callback)
   M.run(vim.list_extend(base_args(number), { "listGroups" }), callback)
 end
 
+function M.list_messages(number, conversation_id, callback)
+  local args = vim.list_extend(base_args(number), { "listMessages", "--conversation-id", conversation_id })
+  M.run(args, callback)
+end
+
 function M.send(number, recipient, body, is_group, callback)
   local args = { config.get().signal_cmd, "-a", number, "send", "-m", body }
   vim.list_extend(args, is_group and { "-g", recipient } or { "-n", recipient })
