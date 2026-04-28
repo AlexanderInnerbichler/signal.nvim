@@ -43,6 +43,7 @@ local state = {
   last_sync      = nil,
   spinner_timer  = nil,
   spinner_frame  = 1,
+  profile        = nil,
 }
 
 local function load_pins()
@@ -125,30 +126,51 @@ render_list = function()
     footer_pos = "center",
   })
 
-  if state.is_loading then
-    local frame = SPINNER[state.spinner_frame] or "⠋"
-    write_buf({ "", "  " .. frame .. "  Syncing…" },
-      { { hl = "SignalLoading", line = 1, col_s = 0, col_e = -1 } })
-    return
-  end
-
-  if state.auth_error then
-    write_buf({
-      "",
-      "  Not linked to Signal.",
-      "",
-      "  Run :SignalSetup to reconnect.",
-    }, {
-      { hl = "SignalLoading", line = 1, col_s = 0, col_e = -1 },
-      { hl = "SignalLoading", line = 3, col_s = 0, col_e = -1 },
-    })
-    return
-  end
-
   local win_width     = vim.api.nvim_win_get_width(state.win)
   local lines         = { "" }
   local specs         = {}
   state.line_conv_map = {}
+
+  -- Profile header (always visible, even while loading or on auth error)
+  if state.account then
+    local prof    = state.profile or {}
+    local name    = (prof.name and prof.name ~= "") and prof.name or state.account
+    local name_ln = #lines
+    table.insert(lines, "  󰀄  " .. name)
+    table.insert(specs, { hl = "SignalName", line = name_ln, col_s = 0, col_e = -1 })
+    local detail_ln = #lines
+    local detail    = "  " .. state.account
+    if prof.about and prof.about ~= "" then
+      detail = detail .. "  ·  " .. prof.about
+    end
+    table.insert(lines, detail)
+    table.insert(specs, { hl = "SignalSnippet", line = detail_ln, col_s = 0, col_e = -1 })
+    local sep_ln = #lines
+    table.insert(lines, "  " .. string.rep("─", math.max(2, win_width - 4)))
+    table.insert(specs, { hl = "SignalTime", line = sep_ln, col_s = 0, col_e = -1 })
+    table.insert(lines, "")
+  end
+
+  if state.is_loading then
+    local spin_ln = #lines
+    local frame   = SPINNER[state.spinner_frame] or "⠋"
+    table.insert(lines, "  " .. frame .. "  Syncing…")
+    table.insert(specs, { hl = "SignalLoading", line = spin_ln, col_s = 0, col_e = -1 })
+    write_buf(lines, specs)
+    return
+  end
+
+  if state.auth_error then
+    local ln1 = #lines
+    table.insert(lines, "  Not linked to Signal.")
+    table.insert(lines, "")
+    local ln3 = #lines
+    table.insert(lines, "  Run :SignalSetup to reconnect.")
+    table.insert(specs, { hl = "SignalLoading", line = ln1, col_s = 0, col_e = -1 })
+    table.insert(specs, { hl = "SignalLoading", line = ln3, col_s = 0, col_e = -1 })
+    write_buf(lines, specs)
+    return
+  end
 
   local function push_label(label)
     local lnum = #lines
@@ -435,6 +457,7 @@ local DEBUG_CONVS = {
 function M.fetch_and_render()
   if config.get().debug then
     state.conversations = vim.deepcopy(DEBUG_CONVS)
+    state.profile       = { name = "You (debug mode)", about = nil }
     state.is_loading    = false
     state.last_sync     = os.time()
     render_list()
@@ -442,6 +465,20 @@ function M.fetch_and_render()
   end
 
   state.auth_error = false
+
+  -- Fetch own profile (fire-and-forget; updates header when it arrives)
+  cli.get_profile(state.account, function(err, prof)
+    if not err and type(prof) == "table" then
+      local given  = prof.givenName or ""
+      local family = prof.familyName or ""
+      local name   = vim.trim(given .. (family ~= "" and (" " .. family) or ""))
+      state.profile = {
+        name  = name ~= "" and name or nil,
+        about = (prof.about and prof.about ~= "") and prof.about or nil,
+      }
+      render_list()
+    end
+  end)
 
   -- Show cached conversations instantly (sub-50ms); skip spinner if cache is warm
   local cache = load_conv_cache()

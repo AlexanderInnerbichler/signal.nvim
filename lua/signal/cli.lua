@@ -5,6 +5,10 @@ function M.list_contacts(_, callback)
   daemon.call("listContacts", {}, callback)
 end
 
+function M.get_profile(account, callback)
+  daemon.call("getProfile", { recipient = account }, callback)
+end
+
 function M.list_groups(_, callback)
   daemon.call("listGroups", {}, callback)
 end
