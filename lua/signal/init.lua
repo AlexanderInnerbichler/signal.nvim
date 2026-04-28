@@ -31,10 +31,40 @@ end
 local SPINNER = { "⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏" }
 
 local SPRITE_FRAMES = {
-  { "▄██▄", "▐██▌", "▀▀▀▀" },
-  { "▄██▄", "████", "▀▀▀▀" },
-  { "▄██▄", "▐██▌", "▀▄▄▄" },
-  { "▄██▄", "████", "▀▀▀▀" },
+  -- 1: neutral stand
+  { " ▄████▄ ", " ▐████▌ ", "▌ ████ ▐", "  █  █  ", " ▄█  █▄ " },
+  -- 2: bob down (▀ = bent knee)
+  { " ▄████▄ ", " ▐████▌ ", "▌ ████ ▐", "  ▀  ▀  ", "  █  █  " },
+  -- 3: neutral (return from bob)
+  { " ▄████▄ ", " ▐████▌ ", "▌ ████ ▐", "  █  █  ", " ▄█  █▄ " },
+  -- 4: look left (head shifted left)
+  { "▄████▄  ", " ▐████▌ ", "▌ ████ ▐", "  █  █  ", " ▄█  █▄ " },
+  -- 5: look right (head shifted right)
+  { "  ▄████▄", " ▐████▌ ", "▌ ████ ▐", "  █  █  ", " ▄█  █▄ " },
+  -- 6: walk A — left arm in, right leg forward
+  { " ▄████▄ ", " ▐████▌ ", "  ████ ▐", "▌ █  █  ", " ▄█   ▄█" },
+  -- 7: walk B — mid stride, feet together
+  { " ▄████▄ ", " ▐████▌ ", "▌ ████ ▐", "  ██    ", " ▄██▄   " },
+  -- 8: walk C — right arm in, left leg forward
+  { " ▄████▄ ", " ▐████▌ ", "▌ ████  ", "  █  █ ▐", "▄█   █▄ " },
+  -- 9: walk D — mid stride other side
+  { " ▄████▄ ", " ▐████▌ ", "▌ ████ ▐", "    ██  ", "   ▄██▄ " },
+  -- 10: wave prep (right arm at shoulder)
+  { " ▄████▄ ", " ▐████▌▌", "▌ ████  ", "  █  █  ", " ▄█  █▄ " },
+  -- 11: wave high (arm at head level)
+  { " ▄████▄▌", " ▐████▌ ", "▌ ████  ", "  █  █  ", " ▄█  █▄ " },
+  -- 12: wave mid (▀ = hand waving)
+  { " ▄████▄ ", " ▐████▌▀", "▌ ████  ", "  █  █  ", " ▄█  █▄ " },
+}
+
+local SPRITE_SEQ = {
+  1, 1,                          -- hold stand
+  2, 1,                          -- bob down, up
+  3, 4, 3, 5, 3,                 -- look left, neutral, look right, neutral
+  6, 7, 8, 9, 7, 6, 7, 8, 9, 7, -- walk cycle (2 passes)
+  1, 1,                          -- pause
+  10, 11, 12, 11, 12, 11, 10,    -- wave (3 flaps)
+  1,                             -- return to stand
 }
 
 local state = {
@@ -52,6 +82,7 @@ local state = {
   spinner_frame  = 1,
   profile        = nil,
   sprite_frame   = 1,
+  sprite_seq_pos = 1,
   sprite_timer   = nil,
   in_list        = false,
 }
@@ -119,9 +150,10 @@ end
 local function start_sprite_anim()
   if state.sprite_timer then return end
   state.sprite_timer = vim.uv.new_timer()
-  state.sprite_timer:start(300, 300, vim.schedule_wrap(function()
+  state.sprite_timer:start(120, 120, vim.schedule_wrap(function()
     if not is_valid() or not state.in_list then return end
-    state.sprite_frame = (state.sprite_frame % #SPRITE_FRAMES) + 1
+    state.sprite_seq_pos = (state.sprite_seq_pos % #SPRITE_SEQ) + 1
+    state.sprite_frame   = SPRITE_SEQ[state.sprite_seq_pos]
     render_list()
   end))
 end
@@ -172,22 +204,25 @@ render_list = function()
     local fr  = SPRITE_FRAMES[state.sprite_frame or 1]
     local gap = "   "
 
-    -- each block char = 3 bytes; "▄██▄" = 12 bytes; indent(2)+sprite(12)+gap(3) = 17
-    local r1_pre = "  " .. fr[1] .. gap
-    local r1_ln  = #lines
-    table.insert(lines, r1_pre .. name)
-    table.insert(specs, { hl = "SignalSprite", line = r1_ln, col_s = 2,       col_e = 14 })
-    table.insert(specs, { hl = "SignalName",   line = r1_ln, col_s = #r1_pre, col_e = -1 })
+    -- rows 0 and 1: sprite + name/detail to the right; col_e is dynamic (byte len varies)
+    local texts   = { name, detail }
+    local hl_txts = { "SignalName", "SignalSnippet" }
+    for ri = 1, 2 do
+      local row = fr[ri]
+      local pre = "  " .. row .. gap
+      local ln  = #lines
+      table.insert(lines, pre .. texts[ri])
+      table.insert(specs, { hl = "SignalSprite",  line = ln, col_s = 2,    col_e = 2 + #row })
+      table.insert(specs, { hl = hl_txts[ri],     line = ln, col_s = #pre, col_e = -1 })
+    end
 
-    local r2_pre = "  " .. fr[2] .. gap
-    local r2_ln  = #lines
-    table.insert(lines, r2_pre .. detail)
-    table.insert(specs, { hl = "SignalSprite",  line = r2_ln, col_s = 2,       col_e = 14 })
-    table.insert(specs, { hl = "SignalSnippet", line = r2_ln, col_s = #r2_pre, col_e = -1 })
-
-    local r3_ln = #lines
-    table.insert(lines, "  " .. fr[3])
-    table.insert(specs, { hl = "SignalSprite", line = r3_ln, col_s = 2, col_e = -1 })
+    -- rows 2-4: sprite only
+    for i = 3, 5 do
+      local row = fr[i]
+      local ln  = #lines
+      table.insert(lines, "  " .. row)
+      table.insert(specs, { hl = "SignalSprite", line = ln, col_s = 2, col_e = 2 + #row })
+    end
 
     local sep_ln = #lines
     table.insert(lines, "  " .. string.rep("─", math.max(2, win_width - 4)))
