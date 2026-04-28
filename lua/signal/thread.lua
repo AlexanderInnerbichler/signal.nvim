@@ -1,6 +1,7 @@
 local M      = {}
 local cli    = require("signal.cli")
 local config = require("signal.config")
+local store  = require("signal.store")
 
 local ns = vim.api.nvim_create_namespace("SignalThread")
 
@@ -65,7 +66,7 @@ local function render()
     vim.api.nvim_win_set_config(state.win, {
       title      = " " .. (conv and conv.name or "Thread") .. " ",
       title_pos  = "center",
-      footer     = " s compose  ·  gr reply  ·  r refresh  ·  q back ",
+      footer     = " s compose  ·  gr reply  ·  ra react  ·  rd delete  ·  q back ",
       footer_pos = "center",
     })
   end
@@ -109,7 +110,7 @@ local function render()
     end
 
     local receipt_glyph, receipt_hl = "", nil
-    if is_self then
+    if is_self and not msg.deleted then
       if msg.status == "read" then
         receipt_glyph = "  ✓✓"
         receipt_hl    = "SignalReceiptRead"
@@ -137,13 +138,35 @@ local function render()
     end
     state.line_msg_map[header_ln + 1] = msg
 
-    local body_lines = vim.split(body, "\n", { plain = true })
-    for bi, bline in ipairs(body_lines) do
-      local body_ln = #lines
-      local prefix  = bi == 1 and ("    " .. attach) or "    "
-      table.insert(lines, prefix .. bline)
-      table.insert(specs, { hl = "SignalMsgBody", line = body_ln, col_s = 4, col_e = -1 })
-      state.line_msg_map[body_ln + 1] = msg
+    if msg.deleted then
+      local del_ln = #lines
+      table.insert(lines, "    This message was deleted")
+      table.insert(specs, { hl = "SignalTime", line = del_ln, col_s = 4, col_e = -1 })
+      state.line_msg_map[del_ln + 1] = msg
+    else
+      local body_lines = vim.split(body, "\n", { plain = true })
+      for bi, bline in ipairs(body_lines) do
+        local body_ln = #lines
+        local prefix  = bi == 1 and ("    " .. attach) or "    "
+        table.insert(lines, prefix .. bline)
+        table.insert(specs, { hl = "SignalMsgBody", line = body_ln, col_s = 4, col_e = -1 })
+        state.line_msg_map[body_ln + 1] = msg
+      end
+
+      if msg.reactions then
+        local parts = {}
+        for emoji, authors in pairs(msg.reactions) do
+          if type(authors) == "table" and #authors > 0 then
+            table.insert(parts, emoji .. " " .. #authors)
+          end
+        end
+        if #parts > 0 then
+          local rl = #lines
+          table.insert(lines, "    " .. table.concat(parts, "  "))
+          table.insert(specs, { hl = "SignalReaction", line = rl, col_s = 4, col_e = -1 })
+          state.line_msg_map[rl + 1] = msg
+        end
+      end
     end
     table.insert(lines, "")
   end
@@ -275,6 +298,45 @@ local function register_keymaps()
     local cur = vim.api.nvim_win_get_cursor(state.win)[1]
     local msg = state.line_msg_map[cur]
     if msg then open_input(msg) end
+  end)
+  bmap("ra", function()
+    if not (state.win and vim.api.nvim_win_is_valid(state.win)) then return end
+    local cur = vim.api.nvim_win_get_cursor(state.win)[1]
+    local msg = state.line_msg_map[cur]
+    if not msg or msg.deleted then return end
+    vim.ui.input({ prompt = "React: " }, function(emoji)
+      if not emoji or emoji == "" then return end
+      local conv = state.conversation
+      cli.send_reaction(state.account, conv.id, conv.kind == "group",
+        emoji, msg.source, msg.timestamp, false)
+      store.add_reaction(conv.id, msg.timestamp, emoji, state.account, false)
+      msg.reactions = msg.reactions or {}
+      msg.reactions[emoji] = msg.reactions[emoji] or {}
+      for _, a in ipairs(msg.reactions[emoji]) do
+        if a == state.account then render(); return end
+      end
+      table.insert(msg.reactions[emoji], state.account)
+      render()
+    end)
+  end)
+  bmap("rd", function()
+    if not (state.win and vim.api.nvim_win_is_valid(state.win)) then return end
+    local cur = vim.api.nvim_win_get_cursor(state.win)[1]
+    local msg = state.line_msg_map[cur]
+    if not msg or msg.source ~= state.account or msg.deleted then return end
+    vim.ui.input({ prompt = "Delete for everyone? (y/N): " }, function(answer)
+      if answer ~= "y" then return end
+      local conv = state.conversation
+      cli.remote_delete(state.account, conv.id, conv.kind == "group", msg.timestamp,
+        function(err)
+          if err then
+            vim.notify("signal.nvim: delete failed: " .. err, vim.log.levels.ERROR)
+          else
+            store.mark_deleted(conv.id, msg.timestamp)
+            M.refresh()
+          end
+        end)
+    end)
   end)
 end
 

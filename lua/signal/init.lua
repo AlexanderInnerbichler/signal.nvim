@@ -171,7 +171,7 @@ render_list = function()
   local function push_conv(c)
     local is_pinned  = state.pinned[c.id]
     local has_unread = c.unread and c.unread > 0
-    local icon       = c.kind == "group" and "  " or "  "
+    local icon       = c.note_to_self and "  " or (c.kind == "group" and "  " or "  ")
     local name       = c.name or c.id or "Unknown"
     local snippet    = c.snippet or ""
     local badge      = has_unread and (" " .. c.unread) or ""
@@ -202,7 +202,7 @@ render_list = function()
     table.insert(specs, { hl = icon_hl, line = name_lnum, col_s = 2, col_e = 2 + #icon })
 
     -- name: bright when unread, dim when read
-    local name_hl = is_pinned and "SignalPinned"
+    local name_hl = (c.note_to_self or is_pinned) and "SignalPinned"
       or (has_unread and (c.kind == "group" and "SignalGroup" or "SignalName"))
       or (c.kind == "group" and "SignalGroupDim" or "SignalNameDim")
     local name_s = #prefix
@@ -229,18 +229,30 @@ render_list = function()
     end, visible)
   end
 
+  -- Note to Self is always rendered first, outside the normal section flow
+  local note_self = nil
+  visible = vim.tbl_filter(function(c)
+    if c.note_to_self then note_self = c; return false end
+    return true
+  end, visible)
+
   local pinned   = vim.tbl_filter(function(c) return  state.pinned[c.id] end, visible)
   local unpinned = vim.tbl_filter(function(c) return not state.pinned[c.id] end, visible)
   local chats    = vim.tbl_filter(function(c) return c.snippet ~= nil and c.snippet ~= "" end, unpinned)
   local contacts = vim.tbl_filter(function(c) return c.snippet == nil  or c.snippet == "" end, unpinned)
 
-  if #pinned == 0 and #chats == 0 and #contacts == 0 then
+  if not note_self and #pinned == 0 and #chats == 0 and #contacts == 0 then
     write_buf({ "", "  No conversations yet.", "",
       "  Link your device and start chatting from your phone." }, {
       { hl = "SignalLoading", line = 1, col_s = 0, col_e = -1 },
       { hl = "SignalLoading", line = 3, col_s = 0, col_e = -1 },
     })
     return
+  end
+
+  if note_self then
+    push_conv(note_self)
+    push_gap()
   end
 
   if #pinned > 0 then
@@ -464,15 +476,17 @@ function M.fetch_and_render()
       if not contacts_done or not groups_done then return end
       local convs = {}
       for _, c in ipairs(contacts_data or {}) do
-        local name = (c.name and c.name ~= "") and c.name or c.number or "Unknown"
-        table.insert(convs, {
-          id      = c.number,
-          name    = name,
-          kind    = "contact",
-          snippet = "",
-          time    = "",
-          unread  = require("signal.notifs").get_unread(c.number),
-        })
+        if c.number ~= state.account then  -- exclude self from contact list
+          local name = (c.name and c.name ~= "") and c.name or c.number or "Unknown"
+          table.insert(convs, {
+            id      = c.number,
+            name    = name,
+            kind    = "contact",
+            snippet = "",
+            time    = "",
+            unread  = require("signal.notifs").get_unread(c.number),
+          })
+        end
       end
       for _, g in ipairs(groups_data or {}) do
         table.insert(convs, {
@@ -482,6 +496,18 @@ function M.fetch_and_render()
           snippet = "",
           time    = "",
           unread  = require("signal.notifs").get_unread(g.id),
+        })
+      end
+      -- Note to Self is always first
+      if state.account then
+        table.insert(convs, 1, {
+          id           = state.account,
+          name         = "Note to Self",
+          kind         = "contact",
+          note_to_self = true,
+          snippet      = "",
+          time         = "",
+          unread       = require("signal.notifs").get_unread(state.account),
         })
       end
 
@@ -638,6 +664,15 @@ function M.update_snippet(id, snippet, time_str)
   end
   save_conv_cache(state.conversations)
   render_list()
+end
+
+function M.unread_count()
+  local notifs = require("signal.notifs")
+  local total = 0
+  for _, conv in ipairs(state.conversations) do
+    total = total + notifs.get_unread(conv.id)
+  end
+  return total
 end
 
 function M.setup(opts)

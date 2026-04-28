@@ -39,4 +39,47 @@ function M.append(conv_id, msg)
   if f then f:write(enc); f:close() end
 end
 
+local function save_msgs(conv_id, msgs)
+  local ok, enc = pcall(vim.fn.json_encode, msgs)
+  if not ok then return end
+  local f = io.open(M.path(conv_id), "w")
+  if f then f:write(enc); f:close() end
+end
+
+function M.add_reaction(conv_id, target_ts, emoji, author, remove)
+  local msgs = M.load(conv_id)
+  for _, m in ipairs(msgs) do
+    if m.timestamp == target_ts then
+      m.reactions = m.reactions or {}
+      m.reactions[emoji] = m.reactions[emoji] or {}
+      if remove then
+        for i, a in ipairs(m.reactions[emoji]) do
+          if a == author then table.remove(m.reactions[emoji], i); break end
+        end
+        if #m.reactions[emoji] == 0 then m.reactions[emoji] = nil end
+      else
+        local found = false
+        for _, a in ipairs(m.reactions[emoji]) do
+          if a == author then found = true; break end
+        end
+        if not found then table.insert(m.reactions[emoji], author) end
+      end
+      break
+    end
+  end
+  save_msgs(conv_id, msgs)
+end
+
+function M.mark_deleted(conv_id, timestamp)
+  local msgs = M.load(conv_id)
+  for _, m in ipairs(msgs) do
+    if m.timestamp == timestamp then
+      m.deleted = true
+      m.message = ""
+      break
+    end
+  end
+  save_msgs(conv_id, msgs)
+end
+
 return M

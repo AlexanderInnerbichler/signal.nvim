@@ -120,6 +120,21 @@ function M.process_messages(messages)
       end
     end
 
+    -- Incoming reaction
+    if dm and dm.reaction and src then
+      local r = dm.reaction
+      store.add_reaction(src, r.targetTimestamp, r.emoji, src, r.remove or false)
+      local thread = require("signal.thread")
+      if thread.get_current_conv_id() == src then thread.refresh() end
+    end
+
+    -- Incoming remote delete
+    if dm and dm.remoteDelete and src then
+      store.mark_deleted(src, dm.remoteDelete.targetTimestamp)
+      local thread = require("signal.thread")
+      if thread.get_current_conv_id() == src then thread.refresh() end
+    end
+
     -- Sent message sync: messages you sent from your phone
     local raw_env = envelope.envelope or envelope
     local sync    = raw_env.syncMessage
