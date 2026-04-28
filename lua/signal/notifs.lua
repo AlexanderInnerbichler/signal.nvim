@@ -67,7 +67,19 @@ local function show_toast(text)
     { buffer = buf, nowait = true, silent = true })
 end
 
-local function process_messages(messages)
+local function fmt_ts(ts)
+  if not ts or ts == 0 then return "" end
+  local t       = math.floor(ts / 1000)
+  local now     = os.time()
+  local tz_off  = os.time(os.date("*t", now)) - os.time(os.date("!*t", now))
+  local today_s = math.floor((now + tz_off) / 86400) * 86400 - tz_off
+  if t >= today_s             then return os.date("%H:%M", t)
+  elseif t >= today_s - 86400 then return "Yesterday"
+  elseif t >= today_s - 6 * 86400 then return os.date("%a", t)
+  else return os.date("%d %b", t) end
+end
+
+function M.process_messages(messages)
   if type(messages) ~= "table" then return end
 
   local signal_init = require("signal")
@@ -84,12 +96,14 @@ local function process_messages(messages)
         state.seen_ts[src] = ts
         state.unread[src]  = (state.unread[src] or 0) + 1
 
-        local name = src
+        local snippet  = dm.message:sub(1, 40)
+        local time_str = fmt_ts(ts)
+        local name     = src
+
         for _, c in ipairs(main_state.conversations or {}) do
           if c.id == src then
-            name = c.name
-            c.snippet = dm.message:sub(1, 40)
-            c.unread  = state.unread[src]
+            name     = c.name
+            c.unread = state.unread[src]
             break
           end
         end
@@ -99,12 +113,10 @@ local function process_messages(messages)
           thread.append_message({ source = src, message = dm.message, timestamp = ts })
         end
 
-        show_toast(name .. ": " .. dm.message:sub(1, 40))
+        show_toast(name .. ": " .. snippet)
 
-        if main_state.win and vim.api.nvim_win_is_valid(main_state.win) then
-          local render = require("signal.init_render")
-          if render then render() end
-        end
+        -- update snippet + persist cache + re-render list
+        signal_init.update_snippet(src, snippet, time_str)
       end
     end
   end
@@ -147,7 +159,7 @@ function M.setup()
           end
           return
         end
-        process_messages(data)
+        M.process_messages(data)
       end)
     end))
   end)

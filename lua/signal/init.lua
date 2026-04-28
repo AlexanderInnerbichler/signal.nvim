@@ -4,7 +4,28 @@ local config = require("signal.config")
 
 local ns = vim.api.nvim_create_namespace("Signal")
 
-local PIN_FILE = vim.fn.expand("~/.local/share/signal-cli/nvim-pinned.json")
+local PIN_FILE      = vim.fn.expand("~/.local/share/signal-cli/nvim-pinned.json")
+local SNIPPET_CACHE = vim.fn.expand("~/.local/share/signal-cli/nvim-snippets.json")
+
+local snippet_cache = nil  -- lazy-loaded; persists for the session
+
+local function get_snippet_cache()
+  if snippet_cache then return snippet_cache end
+  local f = io.open(SNIPPET_CACHE, "r")
+  if not f then snippet_cache = {}; return snippet_cache end
+  local raw = f:read("*a"); f:close()
+  local ok, data = pcall(vim.fn.json_decode, raw)
+  snippet_cache = (ok and type(data) == "table") and data or {}
+  return snippet_cache
+end
+
+local function flush_snippet_cache()
+  if not snippet_cache then return end
+  local ok, enc = pcall(vim.fn.json_encode, snippet_cache)
+  if not ok then return end
+  local f = io.open(SNIPPET_CACHE, "w")
+  if f then f:write(enc); f:close() end
+end
 
 local SPINNER = { "⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏" }
 
@@ -457,6 +478,15 @@ function M.fetch_and_render()
           unread  = require("signal.notifs").get_unread(g.id),
         })
       end
+      -- restore snippets from persistent cache (local file, no network)
+      local cache = get_snippet_cache()
+      for _, c in ipairs(convs) do
+        local cached = cache[c.id]
+        if cached and cached.snippet and cached.snippet ~= "" then
+          c.snippet = cached.snippet
+          c.time    = cached.time or ""
+        end
+      end
       state.conversations = convs
       stop_spinner()
       state.is_loading    = false
@@ -483,11 +513,14 @@ function M.fetch_and_render()
     end)
   end
 
-  -- receive first so signal-cli syncs contacts/groups from the server into its local DB
-  cli.receive(state.account, function(err, _)
+  -- list conversations immediately (reads local DB — no network wait)
+  do_list()
+
+  -- receive in background to pull new messages; process_messages updates snippets
+  cli.receive(state.account, function(err, messages)
     if auth_handled then return end
     if err and config.is_auth_error(err) then handle_auth_error(err) return end
-    do_list()
+    require("signal.notifs").process_messages(messages)
   end)
 end
 
@@ -581,6 +614,25 @@ end
 
 function M.get_state()
   return state
+end
+
+function M.render_list()
+  render_list()
+end
+
+-- called by notifs when a new message updates a conversation
+function M.update_snippet(id, snippet, time_str)
+  for _, c in ipairs(state.conversations) do
+    if c.id == id then
+      c.snippet = snippet
+      c.time    = time_str or c.time
+      break
+    end
+  end
+  local cache = get_snippet_cache()
+  cache[id] = { snippet = snippet, time = time_str or "" }
+  flush_snippet_cache()
+  render_list()
 end
 
 function M.setup(opts)
