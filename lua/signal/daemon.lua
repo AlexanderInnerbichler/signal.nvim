@@ -1,10 +1,13 @@
 local M = {}
 local config = require("signal.config")
 
-local SOCKET_PATH = (os.getenv("XDG_RUNTIME_DIR") or "/run/user/1000") .. "/signal-cli/socket"
+local function socket_path()
+  local xdg = os.getenv("XDG_RUNTIME_DIR") or "/run/user/1000"
+  return xdg:gsub("/+$", "") .. "/signal-cli/socket"
+end
 
 local state = {
-  pipe       = nil,
+  channel    = nil,
   buf        = "",
   pending    = {},
   id_seq     = 0,
@@ -31,9 +34,9 @@ local function process_line(line)
   end
 end
 
-local function on_data(err, data)
-  if err or not data then return end
-  state.buf = state.buf .. data
+-- Neovim channel data: list of strings separated by \n boundaries
+local function on_channel_data(_, data, _)
+  state.buf = state.buf .. table.concat(data, "\n")
   while true do
     local nl = state.buf:find("\n")
     if not nl then break end
@@ -60,17 +63,15 @@ local function on_connected()
 end
 
 local function connect(on_ready)
-  local pipe = vim.loop.new_pipe(false)
-  pipe:connect(SOCKET_PATH, function(err)
-    if err then
-      pipe:close()
-      if on_ready then on_ready(err) end
-      return
-    end
-    state.pipe = pipe
-    pipe:read_start(on_data)
-    if on_ready then on_ready(nil) end
-  end)
+  local ok, id = pcall(vim.fn.sockconnect, "pipe", socket_path(), {
+    on_data = on_channel_data,
+  })
+  if not ok or type(id) ~= "number" or id <= 0 then
+    if on_ready then on_ready(tostring(id)) end
+    return
+  end
+  state.channel = id
+  if on_ready then on_ready(nil) end
 end
 
 local function wait_for_socket(account, attempts)
@@ -82,13 +83,15 @@ local function wait_for_socket(account, attempts)
     end)
     return
   end
-  connect(function(err)
-    if err then
-      vim.defer_fn(function() wait_for_socket(account, attempts + 1) end, 500)
-    else
-      on_connected()
-    end
-  end)
+  vim.defer_fn(function()
+    connect(function(err)
+      if err then
+        wait_for_socket(account, attempts + 1)
+      else
+        on_connected()
+      end
+    end)
+  end, 500)
 end
 
 local function spawn_daemon(account)
@@ -107,7 +110,7 @@ local function spawn_daemon(account)
 end
 
 function M.call(method, params, callback)
-  if not state.pipe then
+  if not state.channel then
     if state.connecting then
       table.insert(state.call_queue, { method = method, params = params, callback = callback })
     else
@@ -118,14 +121,14 @@ function M.call(method, params, callback)
   state.id_seq = state.id_seq + 1
   local id = state.id_seq
   state.pending[id] = callback
-  state.pipe:write(vim.fn.json_encode({
+  vim.fn.chansend(state.channel, vim.fn.json_encode({
     jsonrpc = "2.0", method = method, id = id,
     params  = params or vim.empty_dict(),
   }) .. "\n")
 end
 
 function M.start(account, on_recv)
-  if state.pipe or state.connecting then return end
+  if state.channel or state.connecting then return end
   state.on_recv    = on_recv
   state.connecting = true
 
@@ -139,13 +142,16 @@ function M.start(account, on_recv)
 end
 
 function M.stop()
-  if state.pipe then state.pipe:close(); state.pipe = nil end
+  if state.channel then
+    pcall(vim.fn.chanclose, state.channel)
+    state.channel = nil
+  end
   if state.own_proc then state.own_proc:kill(15); state.own_proc = nil end
   state.buf = ""; state.pending = {}; state.connecting = false; state.call_queue = {}
 end
 
 function M.is_running()
-  return state.pipe ~= nil
+  return state.channel ~= nil
 end
 
 return M
