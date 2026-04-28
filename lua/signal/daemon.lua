@@ -15,7 +15,10 @@ local state = {
   own_proc   = nil,
   connecting = false,
   call_queue = {},
+  account    = nil,
 }
+
+local connect, spawn_daemon
 
 local function process_line(line)
   if line == "" then return end
@@ -36,6 +39,23 @@ end
 
 -- Neovim channel data: list of strings separated by \n boundaries
 local function on_channel_data(_, data, _)
+  if #data == 0 or (#data == 1 and data[1] == "") then
+    state.channel = nil
+    for id, cb in pairs(state.pending) do
+      state.pending[id] = nil
+      cb("daemon disconnected", nil)
+    end
+    if state.account and not state.connecting then
+      state.connecting = true
+      vim.defer_fn(function()
+        connect(function(err)
+          if not err then on_connected()
+          else          spawn_daemon(state.account) end
+        end)
+      end, 1000)
+    end
+    return
+  end
   state.buf = state.buf .. table.concat(data, "\n")
   while true do
     local nl = state.buf:find("\n")
@@ -62,7 +82,7 @@ local function on_connected()
   end, 1000)
 end
 
-local function connect(on_ready)
+connect = function(on_ready)
   local ok, id = pcall(vim.fn.sockconnect, "pipe", socket_path(), {
     on_data = on_channel_data,
   })
@@ -74,13 +94,23 @@ local function connect(on_ready)
   if on_ready then on_ready(nil) end
 end
 
--- Kill any signal-cli processes except our own daemon (by PID).
--- pkill -f doesn't work on WSL2 (matches process name "java", not cmdline), use pgrep|grep|xargs.
+-- Kill signal-cli daemon JVM processes except our own (by PID).
+-- Read /proc directly to avoid shell self-matching with pgrep -f.
 local function kill_competing(own_pid)
-  local cmd = own_pid
-    and ("pgrep -f signal-cli | grep -v '^" .. own_pid .. "$' | xargs -r kill -9 2>/dev/null")
-    or  "pgrep -f signal-cli | xargs -r kill -9 2>/dev/null"
-  vim.fn.system(cmd)
+  local pids = vim.fn.systemlist("pgrep java 2>/dev/null")
+  for _, s in ipairs(pids) do
+    local pid = tonumber(vim.trim(s))
+    if pid and pid ~= own_pid then
+      local f = io.open("/proc/" .. pid .. "/cmdline", "r")
+      if f then
+        local cmdline = f:read("*a"):gsub("%z", " ")
+        f:close()
+        if cmdline:find("signal%-cli") and cmdline:find("daemon") then
+          vim.fn.system("kill -9 " .. pid .. " 2>/dev/null")
+        end
+      end
+    end
+  end
 end
 
 local function wait_for_socket(account, attempts, own_pid)
@@ -91,11 +121,6 @@ local function wait_for_socket(account, attempts, own_pid)
       vim.notify("signal.nvim: timed out waiting for daemon socket", vim.log.levels.WARN)
     end)
     return
-  end
-  -- Keep killing competing signal-cli processes every 2.5s so they can't
-  -- hold the config lock while our daemon is starting up.
-  if attempts % 5 == 0 then
-    kill_competing(own_pid)
   end
   vim.defer_fn(function()
     connect(function(err)
@@ -108,20 +133,23 @@ local function wait_for_socket(account, attempts, own_pid)
   end, 500)
 end
 
-local function spawn_daemon(account)
-  -- Initial kill before spawning — clears the field so daemon can get the lock.
+spawn_daemon = function(account)
   kill_competing(nil)
+  os.remove(socket_path())  -- remove stale socket so new daemon can bind
 
   local stderr = vim.loop.new_pipe(false)
   local proc, pid = vim.loop.spawn(config.get().signal_cmd, {
-    args  = { "-a", account, "daemon", "--socket",
-              "--ignore-attachments", "--ignore-stories",
-              "--receive-mode", "on-start" },
-    stdio = { nil, nil, stderr },
+    args   = { "-a", account, "daemon", "--socket",
+               "--ignore-attachments", "--ignore-stories",
+               "--receive-mode", "on-start" },
+    stdio  = { nil, nil, stderr },
+    detach = true,
   }, vim.schedule_wrap(function()
     state.own_proc = nil
   end))
   stderr:read_start(function() end)
+  stderr:unref()
+  proc:unref()
   state.own_proc = proc
   wait_for_socket(account, 0, pid)
 end
@@ -149,6 +177,7 @@ end
 function M.start(account, on_recv)
   if state.channel or state.connecting then return end
   state.on_recv    = on_recv
+  state.account    = account
   state.connecting = true
 
   connect(function(err)
@@ -161,11 +190,12 @@ function M.start(account, on_recv)
 end
 
 function M.stop()
+  state.account = nil  -- prevent EOF handler from reconnecting on intentional close
   if state.channel then
     pcall(vim.fn.chanclose, state.channel)
     state.channel = nil
   end
-  if state.own_proc then state.own_proc:kill(15); state.own_proc = nil end
+  state.own_proc = nil
   state.buf = ""; state.pending = {}; state.connecting = false; state.call_queue = {}
 end
 
