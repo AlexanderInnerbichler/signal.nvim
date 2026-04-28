@@ -453,6 +453,7 @@ function M.fetch_and_render()
   local function do_list()
     local contacts_done, groups_done = false, false
     local contacts_data, groups_data
+    local pending_messages = nil
 
     local function try_finish()
       if not contacts_done or not groups_done then return end
@@ -479,8 +480,6 @@ function M.fetch_and_render()
         })
       end
 
-      -- Preserve snippets from in-memory state (set by notifs this session)
-      -- and from the previous cache (set in past sessions)
       local snippet_map = {}
       for _, c in ipairs(state.conversations) do
         if c.snippet and c.snippet ~= "" then
@@ -503,6 +502,11 @@ function M.fetch_and_render()
       state.last_sync  = os.time()
       save_conv_cache(convs)
       render_list()
+
+      if pending_messages then
+        require("signal.notifs").process_messages(pending_messages)
+        pending_messages = nil
+      end
     end
 
     cli.list_contacts(state.account, function(err, data)
@@ -522,15 +526,19 @@ function M.fetch_and_render()
       groups_done = true
       try_finish()
     end)
+
+    cli.receive(state.account, function(err, messages)
+      if auth_handled then return end
+      if err and config.is_auth_error(err) then handle_auth_error(err) return end
+      if contacts_done and groups_done then
+        require("signal.notifs").process_messages(messages)
+      else
+        pending_messages = messages
+      end
+    end)
   end
 
   do_list()
-
-  cli.receive(state.account, function(err, messages)
-    if auth_handled then return end
-    if err and config.is_auth_error(err) then handle_auth_error(err) return end
-    require("signal.notifs").process_messages(messages)
-  end)
 end
 
 local function open_win()
