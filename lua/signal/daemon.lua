@@ -138,9 +138,11 @@ function M.call(method, params, callback)
   state.id_seq = state.id_seq + 1
   local id = state.id_seq
   state.pending[id] = callback
+  local p = (params == nil or (type(params) == "table" and not next(params)))
+    and vim.empty_dict() or params
   vim.fn.chansend(state.channel, vim.fn.json_encode({
     jsonrpc = "2.0", method = method, id = id,
-    params  = params or vim.empty_dict(),
+    params  = p,
   }) .. "\n")
 end
 
