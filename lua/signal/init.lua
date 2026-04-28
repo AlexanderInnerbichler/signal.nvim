@@ -4,26 +4,26 @@ local config = require("signal.config")
 
 local ns = vim.api.nvim_create_namespace("Signal")
 
-local PIN_FILE      = vim.fn.expand("~/.local/share/signal-cli/nvim-pinned.json")
-local SNIPPET_CACHE = vim.fn.expand("~/.local/share/signal-cli/nvim-snippets.json")
+local PIN_FILE   = vim.fn.expand("~/.local/share/signal-cli/nvim-pinned.json")
+local CONV_CACHE = vim.fn.expand("~/.local/share/signal-cli/nvim-convs.json")
 
-local snippet_cache = nil  -- lazy-loaded; persists for the session
+local conv_cache_data = nil  -- lazy-loaded; { ts = unix, convs = [...] }
 
-local function get_snippet_cache()
-  if snippet_cache then return snippet_cache end
-  local f = io.open(SNIPPET_CACHE, "r")
-  if not f then snippet_cache = {}; return snippet_cache end
+local function load_conv_cache()
+  if conv_cache_data then return conv_cache_data end
+  local f = io.open(CONV_CACHE, "r")
+  if not f then conv_cache_data = { ts = 0, convs = {} }; return conv_cache_data end
   local raw = f:read("*a"); f:close()
-  local ok, data = pcall(vim.fn.json_decode, raw)
-  snippet_cache = (ok and type(data) == "table") and data or {}
-  return snippet_cache
+  local ok, d = pcall(vim.fn.json_decode, raw)
+  conv_cache_data = (ok and type(d) == "table") and d or { ts = 0, convs = {} }
+  return conv_cache_data
 end
 
-local function flush_snippet_cache()
-  if not snippet_cache then return end
-  local ok, enc = pcall(vim.fn.json_encode, snippet_cache)
+local function save_conv_cache(convs)
+  conv_cache_data = { ts = os.time(), convs = convs }
+  local ok, enc = pcall(vim.fn.json_encode, conv_cache_data)
   if not ok then return end
-  local f = io.open(SNIPPET_CACHE, "w")
+  local f = io.open(CONV_CACHE, "w")
   if f then f:write(enc); f:close() end
 end
 
@@ -429,10 +429,20 @@ function M.fetch_and_render()
     return
   end
 
-  state.is_loading = true
   state.auth_error = false
-  start_spinner()
 
+  -- Show cached conversations instantly (sub-50ms); skip spinner if cache is warm
+  local cache = load_conv_cache()
+  if #(cache.convs) > 0 then
+    state.conversations = vim.deepcopy(cache.convs)
+    state.is_loading    = false
+    render_list()
+  else
+    state.is_loading = true
+    start_spinner()
+  end
+
+  -- Background refresh: always updates contacts/groups/snippets in background
   local auth_handled = false
 
   local function handle_auth_error(err)
@@ -474,19 +484,30 @@ function M.fetch_and_render()
           unread  = require("signal.notifs").get_unread(g.id),
         })
       end
-      -- restore snippets from persistent cache (local file, no network)
-      local cache = get_snippet_cache()
-      for _, c in ipairs(convs) do
-        local cached = cache[c.id]
-        if cached and cached.snippet and cached.snippet ~= "" then
-          c.snippet = cached.snippet
-          c.time    = cached.time or ""
+
+      -- Preserve snippets from in-memory state (set by notifs this session)
+      -- and from the previous cache (set in past sessions)
+      local snippet_map = {}
+      for _, c in ipairs(state.conversations) do
+        if c.snippet and c.snippet ~= "" then
+          snippet_map[c.id] = { snippet = c.snippet, time = c.time }
         end
       end
+      for _, c in ipairs(cache.convs) do
+        if not snippet_map[c.id] and c.snippet and c.snippet ~= "" then
+          snippet_map[c.id] = { snippet = c.snippet, time = c.time }
+        end
+      end
+      for _, c in ipairs(convs) do
+        local s = snippet_map[c.id]
+        if s then c.snippet = s.snippet; c.time = s.time end
+      end
+
       state.conversations = convs
       stop_spinner()
-      state.is_loading    = false
-      state.last_sync     = os.time()
+      state.is_loading = false
+      state.last_sync  = os.time()
+      save_conv_cache(convs)
       render_list()
     end
 
@@ -509,10 +530,8 @@ function M.fetch_and_render()
     end)
   end
 
-  -- list conversations immediately (reads local DB — no network wait)
   do_list()
 
-  -- receive in background to pull new messages; process_messages updates snippets
   cli.receive(state.account, function(err, messages)
     if auth_handled then return end
     if err and config.is_auth_error(err) then handle_auth_error(err) return end
@@ -625,9 +644,7 @@ function M.update_snippet(id, snippet, time_str)
       break
     end
   end
-  local cache = get_snippet_cache()
-  cache[id] = { snippet = snippet, time = time_str or "" }
-  flush_snippet_cache()
+  save_conv_cache(state.conversations)
   render_list()
 end
 
