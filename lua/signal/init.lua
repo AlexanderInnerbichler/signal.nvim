@@ -105,7 +105,7 @@ local function save_pins(set)
 end
 
 local function make_footer()
-  local base = " <CR> open  ·  /  filter  ·  r refresh"
+  local base = " <CR> open  ·  n new  ·  /  filter  ·  r refresh"
   local sync = state.last_sync and ("  ·  synced " .. os.date("%H:%M", state.last_sync)) or ""
   return base .. sync .. "  ·  q close "
 end
@@ -517,6 +517,30 @@ function M.register_keymaps()
     end
     save_pins(state.pinned)
     render_list()
+  end)
+  bmap("n", function()
+    local items = {}
+    for _, c in ipairs(state.conversations) do
+      if not c.note_to_self then
+        table.insert(items, c)
+      end
+    end
+    table.sort(items, function(a, b)
+      return (a.name or ""):lower() < (b.name or ""):lower()
+    end)
+    vim.ui.select(items, {
+      prompt = "New chat: ",
+      format_item = function(c)
+        local icon = c.kind == "group" and "  " or "  "
+        return icon .. (c.name or c.id)
+      end,
+    }, function(conv)
+      if not conv then return end
+      state.in_list = false
+      require("signal.notifs").clear_unread(conv.id)
+      conv.unread = 0
+      require("signal.thread").open(conv, state.account, state.buf, state.win)
+    end)
   end)
 end
 
