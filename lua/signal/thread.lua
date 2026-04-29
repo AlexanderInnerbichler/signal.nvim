@@ -239,7 +239,13 @@ local function open_input(quoted_msg)
 
   local function do_send()
     local all_lines = vim.api.nvim_buf_get_lines(state.input_buf, 0, -1, false)
-    local body = table.concat(all_lines, "\n"):gsub("^%s+", ""):gsub("%s+$", "")
+    local reply_lines = quoted_msg and vim.list_slice(all_lines, 2) or all_lines
+    local body = table.concat(reply_lines, "\n"):gsub("^%s+", ""):gsub("%s+$", "")
+    local quote = quoted_msg and {
+      id     = quoted_msg.timestamp,
+      author = quoted_msg.source,
+      text   = quoted_msg.message or "",
+    } or nil
     close_input()
     if body == "" or not conv then return end
     if state.win and vim.api.nvim_win_is_valid(state.win) then
@@ -282,7 +288,7 @@ local function open_input(quoted_msg)
         end
       end
       render()
-    end)
+    end, quote)
   end
 
   local function imap(mode, lhs, fn)
@@ -337,7 +343,12 @@ local function register_keymaps()
       if not emoji or emoji == "" then return end
       local conv = state.conversation
       cli.send_reaction(state.account, conv.id, conv.kind == "group",
-        emoji, msg.source, msg.timestamp, false)
+        emoji, msg.source, msg.timestamp, false,
+        function(err)
+          if err then
+            vim.notify("signal.nvim: reaction failed: " .. err, vim.log.levels.ERROR)
+          end
+        end)
       store.add_reaction(conv.id, msg.timestamp, emoji, state.account, false)
       msg.reactions = msg.reactions or {}
       msg.reactions[emoji] = msg.reactions[emoji] or {}

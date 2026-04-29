@@ -14,10 +14,11 @@ function M.list_groups(_, callback)
 end
 
 
-function M.send(_, recipient, body, is_group, callback)
+function M.send(_, recipient, body, is_group, callback, quote)
   local params = { message = body }
   if is_group then params.groupId = recipient
   else             params.recipient = { recipient } end
+  if quote then params.quote = quote end
   daemon.call("send", params, callback)
 end
 
