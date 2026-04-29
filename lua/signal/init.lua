@@ -230,6 +230,20 @@ local function stop_sprite_anim()
   end
 end
 
+local function time_greeting()
+  local h = tonumber(os.date("%H"))
+  if h < 5  then return "Good night \xe2\x9c\xa6"
+  elseif h < 12 then return "Good morning \xe2\x9c\xa6"
+  elseif h < 17 then return "Good afternoon \xe2\x9c\xa6"
+  elseif h < 21 then return "Good evening \xe2\x9c\xa6"
+  else               return "Good night \xe2\x9c\xa6"
+  end
+end
+
+local function date_line()
+  return os.date("%A, %d %b")
+end
+
 render_list = function()
   if not is_valid() then return end
   if not state.in_list then return end
@@ -272,23 +286,23 @@ render_list = function()
     for _, s in ipairs(paint_sprite_row(row0, 0, ln0)) do table.insert(specs, s) end
     table.insert(specs, { hl = "SignalName", line = ln0, col_s = #pre0, col_e = -1 })
 
-    -- row 1: torso top + phone number
+    -- row 1: torso top + time greeting
     local row1 = fr[2]; local pre1 = "  " .. row1 .. gap
     local ln1  = #lines
-    table.insert(lines, pre1 .. state.account)
+    table.insert(lines, pre1 .. time_greeting())
     table.insert(specs, { hl = "SignalHeaderBg", line = ln1, col_s = 0, col_e = -1 })
     for _, s in ipairs(paint_sprite_row(row1, 1, ln1)) do table.insert(specs, s) end
-    table.insert(specs, { hl = "SignalSnippet", line = ln1, col_s = #pre1, col_e = -1 })
+    table.insert(specs, { hl = "SignalTimeHot", line = ln1, col_s = #pre1, col_e = -1 })
 
-    -- row 2: arms + about (if present)
-    local row2 = fr[3]; local pre2 = "  " .. row2
-    local ln2  = #lines
-    table.insert(lines, about and (pre2 .. gap .. about) or pre2)
+    -- row 2: arms + about (if set) or current date
+    local row2    = fr[3]; local pre2 = "  " .. row2
+    local side    = about or date_line()
+    local side_hl = about and "SignalProfileAbout" or "SignalTimeWarm"
+    local ln2     = #lines
+    table.insert(lines, pre2 .. gap .. side)
     table.insert(specs, { hl = "SignalHeaderBg", line = ln2, col_s = 0, col_e = -1 })
     for _, s in ipairs(paint_sprite_row(row2, 2, ln2)) do table.insert(specs, s) end
-    if about then
-      table.insert(specs, { hl = "SignalProfileAbout", line = ln2, col_s = #pre2 + #gap, col_e = -1 })
-    end
+    table.insert(specs, { hl = side_hl, line = ln2, col_s = #pre2 + #gap, col_e = -1 })
 
     -- row 3: legs
     local row3 = fr[4]; local ln3 = #lines
