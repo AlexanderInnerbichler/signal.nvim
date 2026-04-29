@@ -18,7 +18,11 @@ function M.send(_, recipient, body, is_group, callback, quote)
   local params = { message = body }
   if is_group then params.groupId = recipient
   else             params.recipient = { recipient } end
-  if quote then params.quote = quote end
+  if quote then
+    params.quoteTimestamp = quote.id
+    params.quoteAuthor    = quote.author
+    params.quoteMessage   = quote.text
+  end
   daemon.call("send", params, callback)
 end
 
@@ -27,8 +31,8 @@ function M.send_reaction(_, recipient, is_group, emoji, target_author, target_ts
     emoji           = emoji,
     targetAuthor    = target_author,
     targetTimestamp = target_ts,
-    remove          = remove or false,
   }
+  if remove then params.remove = true end
   if is_group then params.groupId = recipient
   else             params.recipient = { recipient } end
   daemon.call("sendReaction", params, callback or function() end)

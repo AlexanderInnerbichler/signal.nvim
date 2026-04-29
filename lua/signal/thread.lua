@@ -5,6 +5,8 @@ local store  = require("signal.store")
 
 local ns = vim.api.nvim_create_namespace("SignalThread")
 
+local REACTIONS = { "👍", "❤️", "😂", "😮", "😢", "😡", "🔥", "✅", "👎" }
+
 local state = {
   conversation  = nil,
   account       = nil,
@@ -340,8 +342,8 @@ local function register_keymaps()
     local cur = vim.api.nvim_win_get_cursor(state.win)[1]
     local msg = state.line_msg_map[cur]
     if not msg or msg.deleted then return end
-    vim.ui.input({ prompt = "React: " }, function(emoji)
-      if not emoji or emoji == "" then return end
+    vim.ui.select(REACTIONS, { prompt = "React:" }, function(emoji)
+      if not emoji then return end
       local conv = state.conversation
       cli.send_reaction(state.account, conv.id, conv.kind == "group",
         emoji, msg.source, msg.timestamp, false,
