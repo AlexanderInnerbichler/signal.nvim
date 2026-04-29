@@ -24,7 +24,12 @@ local function apply()
   vim.api.nvim_set_hl(0, "SignalReceiptSent",    { fg = "#334155",                bg = "NONE" })  -- dim
   vim.api.nvim_set_hl(0, "SignalReceiptRead",    { fg = "#60a5fa",                bg = "NONE" })  -- blue (matches sender)
   vim.api.nvim_set_hl(0, "SignalReaction",       { fg = "#a78bfa",                bg = "NONE" })  -- violet
-  vim.api.nvim_set_hl(0, "SignalSprite",         { fg = "#818cf8", bold = true,   bg = "NONE" })  -- indigo
+  vim.api.nvim_set_hl(0, "SignalSpriteSkin",     { fg = "#fbbf24", bold = true,   bg = "NONE" })  -- amber skin/arms
+  vim.api.nvim_set_hl(0, "SignalSpriteBody",     { fg = "#3b82f6",                bg = "NONE" })  -- blue shirt
+  vim.api.nvim_set_hl(0, "SignalSpriteLeg",      { fg = "#6366f1",                bg = "NONE" })  -- indigo jeans
+  vim.api.nvim_set_hl(0, "SignalSpriteShoe",     { fg = "#64748b",                bg = "NONE" })  -- slate shoes
+  vim.api.nvim_set_hl(0, "SignalHeaderBg",       { bg = "#0d1117",                             })  -- dark navy header bg
+  vim.api.nvim_set_hl(0, "SignalProfileAbout",   { fg = "#a78bfa", italic = true, bg = "NONE" })  -- violet italic about
 
   -- setup wizard
   vim.api.nvim_set_hl(0, "SignalSetupCmd",       { fg = "#64748b", italic = true, bg = "NONE" })

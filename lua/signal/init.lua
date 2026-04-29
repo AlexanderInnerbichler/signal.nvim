@@ -55,17 +55,42 @@ local SPRITE_FRAMES = {
   { " ▄████▄▌", " ▐████▌ ", "▌ ████  ", "  █  █  ", " ▄█  █▄ " },
   -- 12: wave mid (▀ = hand waving)
   { " ▄████▄ ", " ▐████▌▀", "▌ ████  ", "  █  █  ", " ▄█  █▄ " },
+  -- 13: groove — left arm raised
+  { "▌▄████▄ ", " ▐████▌▐", "  ████  ", "  █  █  ", " ▄█  █▄ " },
+  -- 14: groove — both arms raised (flanking head)
+  { "▌▄████▄▐", "  ████  ", "  ████  ", "  █  █  ", " ▄█  █▄ " },
+  -- 15: groove — right arm raised
+  { " ▄████▄▐", "▌▐████▌ ", "  ████  ", "  █  █  ", " ▄█  █▄ " },
+  -- 16: groove — crouch with arms flared
+  { " ▄████▄ ", "▌▐████▌▐", "  ████  ", "  ▀  ▀  ", "  █  █  " },
+  -- 17: jump pose (arms up + knees bent)
+  { "▌▄████▄▐", "  ████  ", "  ████  ", "  ▀  ▀  ", " ▄█  █▄ " },
+  -- 18: shuffle right (legs spread right)
+  { " ▄████▄ ", " ▐████▌ ", "▌ ████ ▐", " █   █  ", "▄█   █▄ " },
+  -- 19: shuffle left (legs spread left)
+  { " ▄████▄ ", " ▐████▌ ", "▌ ████ ▐", "  █   █ ", " ▄█   █▄" },
+  -- 20: shuffle together (feet close)
+  { " ▄████▄ ", " ▐████▌ ", "▌ ████ ▐", "  ████  ", " ▄████▄ " },
 }
 
-local SPRITE_SEQ = {
-  1, 1,                          -- hold stand
-  2, 1,                          -- bob down, up
-  3, 4, 3, 5, 3,                 -- look left, neutral, look right, neutral
-  6, 7, 8, 9, 7, 6, 7, 8, 9, 7, -- walk cycle (2 passes)
-  1, 1,                          -- pause
-  10, 11, 12, 11, 12, 11, 10,    -- wave (3 flaps)
-  1,                             -- return to stand
+local SEQ_IDLE = {
+  1, 1, 2, 1, 3, 4, 3, 5, 3,
+  6, 7, 8, 9, 7, 6, 7, 8, 9, 7,
+  1, 1, 10, 11, 12, 11, 12, 11, 10, 1,
 }
+local SEQ_DANCE_A = {   -- groove: arms pump, knees bob
+  1, 16, 13, 14, 15, 14, 13, 16, 17, 16, 17, 16, 1, 1,
+}
+local SEQ_DANCE_B = {   -- shuffle: feet slide
+  1, 18, 20, 19, 20, 18, 20, 19, 20, 1, 1,
+}
+local SEQ_EXCITED = {   -- unread reactive: rapid bounce + arm flash
+  2, 17, 2, 17, 14, 1, 14, 1, 16, 13, 16, 15, 2, 1,
+}
+local SPRITE_SEQ_FULL = {}
+for _, s in ipairs({ SEQ_IDLE, SEQ_DANCE_A, SEQ_IDLE, SEQ_DANCE_B }) do
+  for _, v in ipairs(s) do table.insert(SPRITE_SEQ_FULL, v) end
+end
 
 local state = {
   buf            = nil,
@@ -147,13 +172,52 @@ local function stop_spinner()
   end
 end
 
+local function paint_sprite_row(row_str, row_idx, line_ln)
+  local segs = {}
+  local pos = 1
+  while pos <= #row_str do
+    local b    = row_str:byte(pos)
+    local clen = b < 0x80 and 1 or b < 0xE0 and 2 or b < 0xF0 and 3 or 4
+    local ch   = row_str:sub(pos, pos + clen - 1)
+    local cs   = pos + 1
+    local ce   = pos + clen + 1
+    local hl
+    if row_idx == 0 then
+      if ch ~= " " then hl = "SignalSpriteSkin" end
+    elseif row_idx == 1 then
+      if ch == "▐" or ch == "▌" then hl = "SignalSpriteSkin"
+      elseif ch ~= " "           then hl = "SignalSpriteBody" end
+    elseif row_idx == 2 then
+      if ch == "▌" or ch == "▐" then hl = "SignalSpriteSkin"
+      elseif ch ~= " "           then hl = "SignalSpriteBody" end
+    elseif row_idx == 3 then
+      if ch ~= " " then hl = "SignalSpriteLeg" end
+    elseif row_idx == 4 then
+      if ch ~= " " then hl = "SignalSpriteShoe" end
+    end
+    if hl then
+      table.insert(segs, { hl = hl, line = line_ln, col_s = cs, col_e = ce })
+    end
+    pos = pos + clen
+  end
+  return segs
+end
+
+local function active_seq()
+  for _, c in ipairs(state.conversations) do
+    if (c.unread or 0) > 0 then return SEQ_EXCITED end
+  end
+  return SPRITE_SEQ_FULL
+end
+
 local function start_sprite_anim()
   if state.sprite_timer then return end
   state.sprite_timer = vim.uv.new_timer()
   state.sprite_timer:start(120, 120, vim.schedule_wrap(function()
     if not is_valid() or not state.in_list then return end
-    state.sprite_seq_pos = (state.sprite_seq_pos % #SPRITE_SEQ) + 1
-    state.sprite_frame   = SPRITE_SEQ[state.sprite_seq_pos]
+    local seq = active_seq()
+    state.sprite_seq_pos = (state.sprite_seq_pos % #seq) + 1
+    state.sprite_frame   = seq[state.sprite_seq_pos]
     render_list()
   end))
 end
@@ -196,37 +260,53 @@ render_list = function()
   if state.account then
     local prof   = state.profile or {}
     local name   = (prof.name and prof.name ~= "") and prof.name or state.account
-    local detail = state.account
-    if prof.about and prof.about ~= "" then
-      detail = detail .. "  ·  " .. prof.about
+    local about  = (prof.about and prof.about ~= "") and prof.about or nil
+    local fr     = SPRITE_FRAMES[state.sprite_frame or 1]
+    local gap    = "   "
+
+    -- row 0: head + name
+    local row0 = fr[1]; local pre0 = "  " .. row0 .. gap
+    local ln0  = #lines
+    table.insert(lines, pre0 .. name)
+    table.insert(specs, { hl = "SignalHeaderBg", line = ln0, col_s = 0, col_e = -1 })
+    for _, s in ipairs(paint_sprite_row(row0, 0, ln0)) do table.insert(specs, s) end
+    table.insert(specs, { hl = "SignalName", line = ln0, col_s = #pre0, col_e = -1 })
+
+    -- row 1: torso top + phone number
+    local row1 = fr[2]; local pre1 = "  " .. row1 .. gap
+    local ln1  = #lines
+    table.insert(lines, pre1 .. state.account)
+    table.insert(specs, { hl = "SignalHeaderBg", line = ln1, col_s = 0, col_e = -1 })
+    for _, s in ipairs(paint_sprite_row(row1, 1, ln1)) do table.insert(specs, s) end
+    table.insert(specs, { hl = "SignalSnippet", line = ln1, col_s = #pre1, col_e = -1 })
+
+    -- row 2: arms + about (if present)
+    local row2 = fr[3]; local pre2 = "  " .. row2
+    local ln2  = #lines
+    table.insert(lines, about and (pre2 .. gap .. about) or pre2)
+    table.insert(specs, { hl = "SignalHeaderBg", line = ln2, col_s = 0, col_e = -1 })
+    for _, s in ipairs(paint_sprite_row(row2, 2, ln2)) do table.insert(specs, s) end
+    if about then
+      table.insert(specs, { hl = "SignalProfileAbout", line = ln2, col_s = #pre2 + #gap, col_e = -1 })
     end
 
-    local fr  = SPRITE_FRAMES[state.sprite_frame or 1]
-    local gap = "   "
+    -- row 3: legs
+    local row3 = fr[4]; local ln3 = #lines
+    table.insert(lines, "  " .. row3)
+    table.insert(specs, { hl = "SignalHeaderBg", line = ln3, col_s = 0, col_e = -1 })
+    for _, s in ipairs(paint_sprite_row(row3, 3, ln3)) do table.insert(specs, s) end
 
-    -- rows 0 and 1: sprite + name/detail to the right; col_e is dynamic (byte len varies)
-    local texts   = { name, detail }
-    local hl_txts = { "SignalName", "SignalSnippet" }
-    for ri = 1, 2 do
-      local row = fr[ri]
-      local pre = "  " .. row .. gap
-      local ln  = #lines
-      table.insert(lines, pre .. texts[ri])
-      table.insert(specs, { hl = "SignalSprite",  line = ln, col_s = 2,    col_e = 2 + #row })
-      table.insert(specs, { hl = hl_txts[ri],     line = ln, col_s = #pre, col_e = -1 })
-    end
+    -- row 4: feet
+    local row4 = fr[5]; local ln4 = #lines
+    table.insert(lines, "  " .. row4)
+    table.insert(specs, { hl = "SignalHeaderBg", line = ln4, col_s = 0, col_e = -1 })
+    for _, s in ipairs(paint_sprite_row(row4, 4, ln4)) do table.insert(specs, s) end
 
-    -- rows 2-4: sprite only
-    for i = 3, 5 do
-      local row = fr[i]
-      local ln  = #lines
-      table.insert(lines, "  " .. row)
-      table.insert(specs, { hl = "SignalSprite", line = ln, col_s = 2, col_e = 2 + #row })
-    end
-
+    -- decorative floor separator
     local sep_ln = #lines
-    table.insert(lines, "  " .. string.rep("─", math.max(2, win_width - 4)))
-    table.insert(specs, { hl = "SignalTime", line = sep_ln, col_s = 0, col_e = -1 })
+    table.insert(lines, "  " .. string.rep("▀", math.max(2, win_width - 4)))
+    table.insert(specs, { hl = "SignalHeaderBg",   line = sep_ln, col_s = 0, col_e = -1 })
+    table.insert(specs, { hl = "SignalSpriteBody",  line = sep_ln, col_s = 0, col_e = -1 })
     table.insert(lines, "")
   end
 
