@@ -283,6 +283,7 @@ local function open_input(quoted_msg)
             if srv_ts then m.timestamp = srv_ts end
             m.status = "sent"
             store.append(conv.id, m)
+            require("signal").update_snippet(conv.id, body:sub(1, 40), os.date("%H:%M"))
           end
           break
         end
