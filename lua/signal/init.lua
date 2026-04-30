@@ -100,7 +100,6 @@ local state = {
   auth_error     = false,
   account        = nil,
   line_conv_map  = {},
-  filter         = "",
   pinned         = {},
   last_sync      = nil,
   spinner_timer  = nil,
@@ -111,6 +110,22 @@ local state = {
   sprite_timer   = nil,
   in_list        = false,
 }
+
+local function avatar_chars(c)
+  local name  = c.name or c.id or "?"
+  local parts = vim.split(name, " ", { plain = true, trimempty = true })
+  if #parts >= 2 then
+    return (parts[1]:sub(1, 1) .. parts[2]:sub(1, 1)):upper()
+  end
+  return name:sub(1, 1):upper() .. " "
+end
+
+local function avatar_hl(c)
+  local key = c.id or c.name or ""
+  local n   = 0
+  for i = 1, #key do n = n + string.byte(key, i) end
+  return "SignalAvatar" .. (n % 8 + 1)
+end
 
 local function load_pins()
   local f = io.open(PIN_FILE, "r")
@@ -130,7 +145,7 @@ local function save_pins(set)
 end
 
 local function make_footer()
-  local base = " <CR> open  ·  n new  ·  /  filter  ·  r refresh"
+  local base = " <CR> open  ·  n new  ·  r refresh"
   local sync = state.last_sync and ("  ·  synced " .. os.date("%H:%M", state.last_sync)) or ""
   return base .. sync .. "  ·  q close "
 end
@@ -255,13 +270,10 @@ render_list = function()
   local title = total_unread > 0
     and (" Signal [" .. total_unread .. "] ")
     or  " Signal "
-  local footer = state.filter ~= ""
-    and (" / " .. state.filter .. "  ·  <Esc> clear ")
-    or  make_footer()
   vim.api.nvim_win_set_config(state.win, {
     title      = title,
     title_pos  = "center",
-    footer     = footer,
+    footer     = make_footer(),
     footer_pos = "center",
   })
 
@@ -366,18 +378,19 @@ render_list = function()
   local function push_conv(c)
     local is_pinned  = state.pinned[c.id]
     local has_unread = c.unread and c.unread > 0
-    local icon       = c.note_to_self and "  " or (c.kind == "group" and "  " or "  ")
+    local av         = c.note_to_self and "Me" or avatar_chars(c)
     local name       = c.name or c.id or "Unknown"
     local snippet    = c.snippet or ""
     local badge      = has_unread and (" " .. c.unread) or ""
     local timestr    = (c.time or "") .. badge
 
-    -- col 0-1: green dot for unread, blank otherwise; then icon
-    local dot    = has_unread and "● " or "  "
-    local prefix = dot .. icon
-    local gap    = math.max(1, win_width - 6 - #name - #timestr - 2)
-    local line1  = prefix .. name .. string.rep(" ", gap) .. timestr
-    local line2  = "  " .. icon .. " " .. snippet:sub(1, win_width - 8)
+    -- "● " is 4 bytes (3-byte UTF-8 + space); "  " is 2 bytes — track for correct col offsets
+    local dot     = has_unread and "● " or "  "
+    local dot_len = #dot
+    local prefix  = dot .. av
+    local gap     = math.max(1, win_width - 6 - #name - #timestr - 2)
+    local line1   = prefix .. " " .. name .. string.rep(" ", gap) .. timestr
+    local line2   = "     " .. snippet:sub(1, win_width - 8)
 
     local name_lnum    = #lines
     local snippet_lnum = #lines + 1
@@ -389,18 +402,18 @@ render_list = function()
 
     -- unread dot
     if has_unread then
-      table.insert(specs, { hl = "SignalUnreadDot", line = name_lnum, col_s = 0, col_e = 2 })
+      table.insert(specs, { hl = "SignalUnreadDot", line = name_lnum, col_s = 0, col_e = dot_len })
     end
 
-    -- icon: dim, type-specific
-    local icon_hl = c.kind == "group" and "SignalGroupDim" or "SignalNameDim"
-    table.insert(specs, { hl = icon_hl, line = name_lnum, col_s = 2, col_e = 2 + #icon })
+    -- avatar badge
+    local av_hl = c.note_to_self and "SignalAvatarSelf" or avatar_hl(c)
+    table.insert(specs, { hl = av_hl, line = name_lnum, col_s = dot_len, col_e = dot_len + #av })
 
     -- name: bright when unread, dim when read
     local name_hl = (c.note_to_self or is_pinned) and "SignalPinned"
       or (has_unread and (c.kind == "group" and "SignalGroup" or "SignalName"))
       or (c.kind == "group" and "SignalGroupDim" or "SignalNameDim")
-    local name_s = #prefix
+    local name_s = dot_len + #av + 1
     table.insert(specs, { hl = name_hl, line = name_lnum, col_s = name_s, col_e = name_s + #name })
 
     -- timestamp (recency-tinted) + badge
@@ -416,13 +429,6 @@ render_list = function()
   end
 
   local visible = state.conversations
-
-  if state.filter ~= "" then
-    local q = state.filter:lower()
-    visible = vim.tbl_filter(function(c)
-      return (c.name or ""):lower():find(q, 1, true) ~= nil
-    end, visible)
-  end
 
   -- Note to Self is always rendered first, outside the normal section flow
   local note_self = nil
@@ -568,20 +574,8 @@ function M.register_keymaps()
     vim.keymap.set("n", lhs, fn, { buffer = state.buf, nowait = true, silent = true })
   end
   bmap("q",     M.close)
-  bmap("<Esc>", function()
-    if state.filter ~= "" then
-      state.filter = ""
-      render_list()
-    else
-      M.close()
-    end
-  end)
+  bmap("<Esc>", M.close)
   bmap("r",     function() M.fetch_and_render() end)
-  bmap("/",     function()
-    local q = vim.fn.input("/")
-    state.filter = vim.trim(q)
-    render_list()
-  end)
   bmap("<CR>",  function()
     if not is_valid() then return end
     local cur  = vim.api.nvim_win_get_cursor(state.win)[1]
@@ -613,11 +607,22 @@ function M.register_keymaps()
     render_list()
   end)
   bmap("n", function()
+    if state.is_loading then
+      vim.notify("signal.nvim: contacts are still loading, please wait…", vim.log.levels.INFO)
+      return
+    end
     local items = {}
     for _, c in ipairs(state.conversations) do
       if not c.note_to_self then
         table.insert(items, c)
       end
+    end
+    if #items == 0 then
+      vim.notify(
+        "signal.nvim: no contacts found — if you just linked this device, contacts may still be syncing from your phone",
+        vim.log.levels.WARN
+      )
+      return
     end
     table.sort(items, function(a, b)
       return (a.name or ""):lower() < (b.name or ""):lower()
@@ -831,7 +836,6 @@ end
 
 function M.return_to_list()
   state.in_list = true
-  state.filter  = ""
   for _, c in ipairs(state.conversations) do
     c.unread = require("signal.notifs").get_unread(c.id)
   end
