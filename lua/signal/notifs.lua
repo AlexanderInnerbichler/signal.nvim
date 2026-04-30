@@ -90,7 +90,7 @@ function M.process_messages(messages)
     local src = envelope.source or (envelope.envelope and envelope.envelope.source)
     local ts  = (dm and dm.timestamp) or envelope.timestamp or 0
 
-    if dm and dm.message and src then
+    if dm and type(dm.message) == "string" and src then
       local last = state.seen_ts[src] or 0
       if ts > last then
         state.seen_ts[src] = ts
@@ -121,7 +121,7 @@ function M.process_messages(messages)
     end
 
     -- Incoming reaction
-    if dm and dm.reaction and src then
+    if dm and type(dm.reaction) == "table" and src then
       local r = dm.reaction
       store.add_reaction(src, r.targetTimestamp, r.emoji, src, r.remove or false)
       local thread = require("signal.thread")
@@ -129,7 +129,7 @@ function M.process_messages(messages)
     end
 
     -- Incoming remote delete
-    if dm and dm.remoteDelete and src then
+    if dm and type(dm.remoteDelete) == "table" and src then
       store.mark_deleted(src, dm.remoteDelete.targetTimestamp)
       local thread = require("signal.thread")
       if thread.get_current_conv_id() == src then thread.refresh() end
@@ -139,7 +139,7 @@ function M.process_messages(messages)
     local raw_env = envelope.envelope or envelope
     local sync    = raw_env.syncMessage
     local sm      = sync and sync.sentMessage
-    if sm and sm.message then
+    if sm and type(sm.message) == "string" then
       local dest_id
       if sm.groupInfo then
         dest_id = sm.groupInfo.groupId
