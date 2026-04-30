@@ -21,6 +21,7 @@ local function apply()
   vim.api.nvim_set_hl(0, "SignalSenderOther",    { fg = "#60a5fa", bold = true,   bg = "NONE" })  -- blue
   vim.api.nvim_set_hl(0, "SignalSenderSelf",     { fg = "#34d399", bold = true,   bg = "NONE" })  -- emerald
   vim.api.nvim_set_hl(0, "SignalMsgBody",        { fg = "#94a3b8",                bg = "NONE" })  -- readable body
+  vim.api.nvim_set_hl(0, "SignalMsgSelfBg",     { fg = "#a7f3d0",                bg = "#0c1f15" }) -- own message: mint text, dark green bg
   vim.api.nvim_set_hl(0, "SignalReceiptSent",    { fg = "#334155",                bg = "NONE" })  -- dim
   vim.api.nvim_set_hl(0, "SignalReceiptRead",    { fg = "#60a5fa",                bg = "NONE" })  -- blue (matches sender)
   vim.api.nvim_set_hl(0, "SignalReaction",       { fg = "#a78bfa",                bg = "NONE" })  -- violet
@@ -30,6 +31,17 @@ local function apply()
   vim.api.nvim_set_hl(0, "SignalSpriteShoe",     { fg = "#64748b",                bg = "NONE" })  -- slate shoes
   vim.api.nvim_set_hl(0, "SignalHeaderBg",       { bg = "#0d1117",                             })  -- dark navy header bg
   vim.api.nvim_set_hl(0, "SignalProfileAbout",   { fg = "#a78bfa", italic = true, bg = "NONE" })  -- violet italic about
+
+  -- avatars
+  vim.api.nvim_set_hl(0, "SignalAvatar1",    { fg = "#fef2f2", bg = "#b91c1c", bold = true })
+  vim.api.nvim_set_hl(0, "SignalAvatar2",    { fg = "#fff7ed", bg = "#c2410c", bold = true })
+  vim.api.nvim_set_hl(0, "SignalAvatar3",    { fg = "#fffbeb", bg = "#b45309", bold = true })
+  vim.api.nvim_set_hl(0, "SignalAvatar4",    { fg = "#f0fdf4", bg = "#15803d", bold = true })
+  vim.api.nvim_set_hl(0, "SignalAvatar5",    { fg = "#f0fdfa", bg = "#0f766e", bold = true })
+  vim.api.nvim_set_hl(0, "SignalAvatar6",    { fg = "#eff6ff", bg = "#1d4ed8", bold = true })
+  vim.api.nvim_set_hl(0, "SignalAvatar7",    { fg = "#f5f3ff", bg = "#6d28d9", bold = true })
+  vim.api.nvim_set_hl(0, "SignalAvatar8",    { fg = "#fdf2f8", bg = "#be185d", bold = true })
+  vim.api.nvim_set_hl(0, "SignalAvatarSelf", { fg = "#94a3b8", bg = "#1e293b", bold = true })
 
   -- setup wizard
   vim.api.nvim_set_hl(0, "SignalSetupCmd",       { fg = "#64748b", italic = true, bg = "NONE" })

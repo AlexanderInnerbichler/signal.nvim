@@ -19,6 +19,22 @@ local state = {
   line_msg_map  = {},
 }
 
+local function avatar_char(name_or_id)
+  local name  = name_or_id or "?"
+  local parts = vim.split(name, " ", { plain = true, trimempty = true })
+  if #parts >= 2 then
+    return (parts[1]:sub(1, 1) .. parts[2]:sub(1, 1)):upper()
+  end
+  return name:sub(1, 1):upper()
+end
+
+local function avatar_hl(id_or_name)
+  local key = id_or_name or ""
+  local n   = 0
+  for i = 1, #key do n = n + string.byte(key, i) end
+  return "SignalAvatar" .. (n % 8 + 1)
+end
+
 local function write_buf(lines, specs)
   if not state.buf or not vim.api.nvim_buf_is_valid(state.buf) then return end
   vim.bo[state.buf].modifiable = true
@@ -26,7 +42,15 @@ local function write_buf(lines, specs)
   vim.bo[state.buf].modifiable = false
   vim.api.nvim_buf_clear_namespace(state.buf, ns, 0, -1)
   for _, s in ipairs(specs or {}) do
-    vim.api.nvim_buf_add_highlight(state.buf, ns, s.hl, s.line, s.col_s, s.col_e)
+    if s.hl_eol then
+      vim.api.nvim_buf_set_extmark(state.buf, ns, s.line, s.col_s, {
+        hl_group = s.hl,
+        end_col  = s.col_e >= 0 and s.col_e or nil,
+        hl_eol   = true,
+      })
+    else
+      vim.api.nvim_buf_add_highlight(state.buf, ns, s.hl, s.line, s.col_s, s.col_e)
+    end
   end
 end
 
@@ -131,14 +155,19 @@ local function render()
       end
     end
 
+    local av_key  = is_self and "self" or (msg.source or sender)
+    local av      = is_self and "Me" or avatar_char(sender)
+    local av_hl_g = is_self and "SignalAvatarSelf" or avatar_hl(av_key)
+
     local header_ln   = #lines
-    local header_line = "  " .. sender .. "  " .. time_str .. receipt_glyph
+    local header_line = "  " .. av .. " " .. sender .. "  " .. time_str .. receipt_glyph
     table.insert(lines, header_line)
+    table.insert(specs, { hl = av_hl_g, line = header_ln, col_s = 2, col_e = 2 + #av })
     table.insert(specs, {
       hl = is_self and "SignalSenderSelf" or "SignalSenderOther",
-      line = header_ln, col_s = 2, col_e = 2 + #sender,
+      line = header_ln, col_s = 2 + #av + 1, col_e = 2 + #av + 1 + #sender,
     })
-    local time_s = 2 + #sender + 2
+    local time_s = 2 + #av + 1 + #sender + 2
     local time_e = time_s + #time_str
     table.insert(specs, { hl = "SignalTime", line = header_ln, col_s = time_s, col_e = time_e })
     if receipt_hl then
@@ -170,7 +199,11 @@ local function render()
         local body_ln = #lines
         local prefix  = bi == 1 and ("    " .. attach) or "    "
         table.insert(lines, prefix .. bline)
-        table.insert(specs, { hl = "SignalMsgBody", line = body_ln, col_s = 4, col_e = -1 })
+        if is_self then
+          table.insert(specs, { hl = "SignalMsgSelfBg", line = body_ln, col_s = 0, col_e = -1, hl_eol = true })
+        else
+          table.insert(specs, { hl = "SignalMsgBody", line = body_ln, col_s = 4, col_e = -1 })
+        end
         state.line_msg_map[body_ln + 1] = msg
       end
 
@@ -194,7 +227,11 @@ local function render()
 
   write_buf(lines, specs)
   if state.win and vim.api.nvim_win_is_valid(state.win) then
-    vim.api.nvim_win_set_cursor(state.win, { #lines, 0 })
+    local last_msg_line = #lines
+    while last_msg_line > 1 and not state.line_msg_map[last_msg_line] do
+      last_msg_line = last_msg_line - 1
+    end
+    vim.api.nvim_win_set_cursor(state.win, { last_msg_line, 0 })
   end
 end
 
@@ -258,7 +295,9 @@ local function open_input(quoted_msg)
     local body = table.concat(reply_lines, "\n"):gsub("^%s+", ""):gsub("%s+$", "")
     local quote = quoted_msg and {
       id     = quoted_msg.timestamp,
-      author = quoted_msg.source,
+      author = (quoted_msg.source and quoted_msg.source ~= vim.NIL)
+        and quoted_msg.source
+        or state.account,
       text   = quoted_msg.message or "",
     } or nil
     close_input()
