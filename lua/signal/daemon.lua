@@ -97,7 +97,7 @@ end
 -- Kill signal-cli daemon JVM processes except our own (by PID).
 -- Read /proc directly to avoid shell self-matching with pgrep -f.
 local function kill_competing(own_pid)
-  local pids = vim.fn.systemlist("pgrep java 2>/dev/null")
+  local pids = vim.fn.systemlist("pgrep -f 'signal-cli' 2>/dev/null")
   for _, s in ipairs(pids) do
     local pid = tonumber(vim.trim(s))
     if pid and pid ~= own_pid then
@@ -106,7 +106,7 @@ local function kill_competing(own_pid)
         local cmdline = f:read("*a"):gsub("%z", " ")
         f:close()
         if cmdline:find("signal%-cli") and cmdline:find("daemon") then
-          vim.fn.system("kill -9 " .. pid .. " 2>/dev/null")
+          vim.fn.system({ "kill", "-9", tostring(pid) })
         end
       end
     end

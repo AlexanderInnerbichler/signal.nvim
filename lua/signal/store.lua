@@ -53,8 +53,8 @@ function M.add_reaction(conv_id, target_ts, emoji, author, remove)
       m.reactions = m.reactions or {}
       m.reactions[emoji] = m.reactions[emoji] or {}
       if remove then
-        for i, a in ipairs(m.reactions[emoji]) do
-          if a == author then table.remove(m.reactions[emoji], i); break end
+        for i = #m.reactions[emoji], 1, -1 do
+          if m.reactions[emoji][i] == author then table.remove(m.reactions[emoji], i); break end
         end
         if #m.reactions[emoji] == 0 then m.reactions[emoji] = nil end
       else

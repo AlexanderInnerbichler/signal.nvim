@@ -868,6 +868,7 @@ function M.close()
 end
 
 function M.open()
+  state.auth_error = false
   state.pinned = load_pins()
   if config.get().debug then
     state.account = "+43000000000"
