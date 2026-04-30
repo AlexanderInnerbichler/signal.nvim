@@ -146,6 +146,19 @@ local function render()
     end
     state.line_msg_map[header_ln + 1] = msg
 
+    if msg.quote and type(msg.quote) == "table" then
+      local q_author = msg.quote.author
+      local conv_list = require("signal").get_state().conversations or {}
+      for _, c in ipairs(conv_list) do
+        if c.id == q_author then q_author = c.name; break end
+      end
+      if q_author == state.account then q_author = "You" end
+      local q_text = (msg.quote.text or ""):match("([^\n]*)")
+      local ql = #lines
+      table.insert(lines, "  \xe2\x94\x86 " .. q_author .. ": " .. q_text:sub(1, win_w - 12))
+      table.insert(specs, { hl = "SignalTime", line = ql, col_s = 0, col_e = -1 })
+    end
+
     if msg.deleted then
       local del_ln = #lines
       table.insert(lines, "    This message was deleted")
@@ -260,6 +273,7 @@ local function open_input(quoted_msg)
       timestamp = os.time() * 1000,
       status    = "sending",
       _pending  = true,
+      quote     = quote and { author = quote.author, text = quote.text } or nil,
     }
     table.insert(state.messages, pending_msg)
     render()

@@ -109,11 +109,16 @@ function M.process_messages(messages)
           end
         end
 
-        store.append(conv_id, { source = src, message = dm.message, timestamp = ts, is_self = false })
+        local quote_ref = type(dm.quote) == "table" and {
+          author = dm.quote.author,
+          text   = type(dm.quote.text) == "string" and dm.quote.text or "",
+        } or nil
+
+        store.append(conv_id, { source = src, message = dm.message, timestamp = ts, is_self = false, quote = quote_ref })
 
         local thread = require("signal.thread")
         if thread.get_current_conv_id() == conv_id then
-          thread.append_message({ source = src, message = dm.message, timestamp = ts })
+          thread.append_message({ source = src, message = dm.message, timestamp = ts, quote = quote_ref })
         end
 
         show_toast(name .. ": " .. snippet)
