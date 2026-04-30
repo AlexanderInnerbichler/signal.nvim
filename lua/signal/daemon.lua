@@ -2,7 +2,7 @@ local M = {}
 local config = require("signal.config")
 
 local function socket_path()
-  local xdg = os.getenv("XDG_RUNTIME_DIR") or "/run/user/1000"
+  local xdg = os.getenv("XDG_RUNTIME_DIR") or ("/run/user/" .. vim.uv.getuid())
   return xdg:gsub("/+$", "") .. "/signal-cli/socket"
 end
 
@@ -115,12 +115,23 @@ end
 
 local function wait_for_socket(account, attempts, own_pid)
   attempts = attempts or 0
-  if attempts > 40 then
+  if attempts > 20 then
     state.connecting = false
     vim.schedule(function()
-      vim.notify("signal.nvim: timed out waiting for daemon socket", vim.log.levels.WARN)
+      vim.notify(
+        "signal.nvim: daemon did not start after 10s — check signal-cli config",
+        vim.log.levels.ERROR
+      )
     end)
     return
+  end
+  if attempts > 0 and attempts % 5 == 0 then
+    vim.schedule(function()
+      vim.notify(
+        "signal.nvim: waiting for daemon… " .. math.floor(attempts / 2) .. "s",
+        vim.log.levels.INFO
+      )
+    end)
   end
   vim.defer_fn(function()
     connect(function(err)
@@ -151,6 +162,9 @@ spawn_daemon = function(account)
   stderr:unref()
   proc:unref()
   state.own_proc = proc
+  vim.schedule(function()
+    vim.notify("signal.nvim: starting daemon, please wait…", vim.log.levels.INFO)
+  end)
   wait_for_socket(account, 0, pid)
 end
 

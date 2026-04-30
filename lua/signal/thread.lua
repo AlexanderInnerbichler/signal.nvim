@@ -364,6 +364,19 @@ local function open_input(quoted_msg)
     table.insert(state.messages, pending_msg)
     render()
 
+    local pending_ts = pending_msg.timestamp
+    vim.defer_fn(function()
+      for _, m in ipairs(state.messages) do
+        if m._pending and m.timestamp == pending_ts then
+          m._pending = nil
+          m.status   = "error"
+          require("signal").clear_status()
+          render()
+          break
+        end
+      end
+    end, 30000)
+
     if config.get().debug then
       local thread = DEBUG_THREADS[conv.id] or {}
       table.insert(thread, { source = state.account, message = body, timestamp = now_ms(), status = "sent" })
