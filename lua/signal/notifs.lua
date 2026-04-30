@@ -122,17 +122,19 @@ function M.process_messages(messages)
 
     -- Incoming reaction
     if dm and type(dm.reaction) == "table" and src then
-      local r = dm.reaction
-      store.add_reaction(src, r.targetTimestamp, r.emoji, src, r.remove or false)
+      local r       = dm.reaction
+      local conv_id = (type(dm.groupInfo) == "table") and dm.groupInfo.groupId or src
+      store.add_reaction(conv_id, r.targetSentTimestamp, r.emoji, src, r.isRemove or false)
       local thread = require("signal.thread")
-      if thread.get_current_conv_id() == src then thread.refresh() end
+      if thread.get_current_conv_id() == conv_id then thread.refresh() end
     end
 
     -- Incoming remote delete
     if dm and type(dm.remoteDelete) == "table" and src then
-      store.mark_deleted(src, dm.remoteDelete.targetTimestamp)
+      local conv_id = (type(dm.groupInfo) == "table") and dm.groupInfo.groupId or src
+      store.mark_deleted(conv_id, dm.remoteDelete.timestamp)
       local thread = require("signal.thread")
-      if thread.get_current_conv_id() == src then thread.refresh() end
+      if thread.get_current_conv_id() == conv_id then thread.refresh() end
     end
 
     -- Sent message sync: messages you sent from your phone
