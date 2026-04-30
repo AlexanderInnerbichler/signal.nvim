@@ -109,6 +109,7 @@ local state = {
   sprite_seq_pos = 1,
   sprite_timer   = nil,
   in_list        = false,
+  status_msg     = nil,
 }
 
 local function avatar_chars(c)
@@ -180,6 +181,7 @@ local function start_spinner()
 end
 
 local function stop_spinner()
+  if state.is_loading or state.status_msg then return end
   if state.spinner_timer then
     state.spinner_timer:stop()
     state.spinner_timer:close()
@@ -336,25 +338,35 @@ render_list = function()
     table.insert(lines, "")
   end
 
+  local status_ln = #lines
   if state.is_loading then
-    local spin_ln = #lines
-    local frame   = SPINNER[state.spinner_frame] or "⠋"
-    table.insert(lines, "  " .. frame .. "  Syncing…")
-    table.insert(specs, { hl = "SignalLoading", line = spin_ln, col_s = 0, col_e = -1 })
-    write_buf(lines, specs)
-    return
-  end
-
-  if state.auth_error then
-    local ln1 = #lines
-    table.insert(lines, "  Not linked to Signal.")
+    local frame = SPINNER[state.spinner_frame] or "⠋"
+    table.insert(lines, "  " .. frame .. "  Syncing contacts…")
+    table.insert(specs, { hl = "SignalLoading", line = status_ln, col_s = 0, col_e = -1 })
     table.insert(lines, "")
-    local ln3 = #lines
+  elseif state.auth_error then
+    table.insert(lines, "  ✗  Not linked to Signal.")
+    table.insert(specs, { hl = "SignalSetupErr", line = status_ln, col_s = 0, col_e = -1 })
+    table.insert(lines, "")
+    local ln2 = #lines
     table.insert(lines, "  Run :SignalSetup to reconnect.")
-    table.insert(specs, { hl = "SignalLoading", line = ln1, col_s = 0, col_e = -1 })
-    table.insert(specs, { hl = "SignalLoading", line = ln3, col_s = 0, col_e = -1 })
+    table.insert(specs, { hl = "SignalLoading", line = ln2, col_s = 0, col_e = -1 })
+    table.insert(lines, "")
     write_buf(lines, specs)
     return
+  elseif state.status_msg then
+    local frame = SPINNER[state.spinner_frame] or "⠋"
+    table.insert(lines, "  " .. frame .. "  " .. state.status_msg)
+    table.insert(specs, { hl = "SignalLoading", line = status_ln, col_s = 0, col_e = -1 })
+    table.insert(lines, "")
+  else
+    local sync_str = state.last_sync
+      and ("synced " .. os.date("%H:%M", state.last_sync))
+      or  "not yet synced"
+    table.insert(lines, "  ●  Online · " .. sync_str)
+    table.insert(specs, { hl = "SignalUnread",  line = status_ln, col_s = 2, col_e = 3 })
+    table.insert(specs, { hl = "SignalLoading", line = status_ln, col_s = 5, col_e = -1 })
+    table.insert(lines, "")
   end
 
   local function push_label(label)
@@ -895,6 +907,18 @@ end
 
 function M.get_state()
   return state
+end
+
+function M.set_status(msg)
+  state.status_msg = msg
+  if msg and not state.spinner_timer then start_spinner() end
+  if state.in_list then render_list() end
+end
+
+function M.clear_status()
+  state.status_msg = nil
+  stop_spinner()
+  if state.in_list then render_list() end
 end
 
 function M.render_list()

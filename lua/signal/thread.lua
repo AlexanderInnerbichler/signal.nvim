@@ -373,7 +373,9 @@ local function open_input(quoted_msg)
       render()
       return
     end
+    require("signal").set_status("Sending…")
     cli.send(state.account, conv.id, body, conv.kind == "group", function(err, result)
+      require("signal").clear_status()
       for _, m in ipairs(state.messages) do
         if m._pending then
           m._pending = nil
