@@ -39,14 +39,19 @@ vim.keymap.set("n", "<leader>si", function() require("signal").toggle() end,
   { desc = "Toggle Signal" })
 ```
 
-### 4. Register your number
+### 4. Link your device
+
+Open Neovim and run:
 
 ```
-:SignalSetup
+:SignalLink
 ```
 
-The wizard handles registration, captcha, and SMS verification entirely inside Neovim.
-Your number is cached after a successful verify — no re-registration on next start.
+A QR code URL is printed — open it in your browser, scan from Signal on your phone
+(**Settings → Linked devices → Link new device**). Your account is cached after a
+successful link; no re-linking on next start.
+
+> First time registering a brand-new number instead of linking? Use `:SignalSetup`.
 
 ## Config
 
@@ -66,20 +71,27 @@ require("signal").setup({
 | Key | Action |
 |-----|--------|
 | `<CR>` | Open thread |
+| `n` | New chat (pick from contacts) |
 | `/` | Filter conversations by name |
-| `r` | Refresh |
 | `<Esc>` | Clear filter / close |
+| `r` | Refresh |
+| `p` | View contact profile |
+| `P` | Pin / unpin conversation |
 | `q` | Close |
 
 ### Thread view
 
 | Key | Action |
 |-----|--------|
-| `s` | Compose message |
+| `s` | Compose new message |
+| `gr` | Reply (quotes selected message) |
+| `ra` | React with emoji |
+| `rd` | Delete message for everyone |
 | `r` | Refresh |
+| `p` | View contact profile |
 | `q` / `<Esc>` | Back to list |
 
-### Compose popup
+### Compose / reply popup
 
 | Key | Action |
 |-----|--------|
