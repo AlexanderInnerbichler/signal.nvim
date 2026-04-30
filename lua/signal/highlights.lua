@@ -22,6 +22,7 @@ local function apply()
   vim.api.nvim_set_hl(0, "SignalSenderSelf",     { fg = "#34d399", bold = true,   bg = "NONE" })  -- emerald
   vim.api.nvim_set_hl(0, "SignalMsgBody",        { fg = "#94a3b8",                bg = "NONE" })  -- readable body
   vim.api.nvim_set_hl(0, "SignalMsgSelfBg",     { fg = "#a7f3d0",                bg = "#0c1f15" }) -- own message: mint text, dark green bg
+  vim.api.nvim_set_hl(0, "SignalQuoteBg",       { fg = "#64748b",                bg = "#0f172a" }) -- quote block: slate text, dark navy bg
   vim.api.nvim_set_hl(0, "SignalReceiptSent",    { fg = "#334155",                bg = "NONE" })  -- dim
   vim.api.nvim_set_hl(0, "SignalReceiptRead",    { fg = "#60a5fa",                bg = "NONE" })  -- blue (matches sender)
   vim.api.nvim_set_hl(0, "SignalReaction",       { fg = "#a78bfa",                bg = "NONE" })  -- violet

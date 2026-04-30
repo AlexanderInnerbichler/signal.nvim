@@ -8,15 +8,16 @@ local ns = vim.api.nvim_create_namespace("SignalThread")
 local REACTIONS = { "👍", "❤️", "😂", "😮", "😢", "😡", "🔥", "✅", "👎" }
 
 local state = {
-  conversation  = nil,
-  account       = nil,
-  messages      = {},
-  buf           = nil,
-  win           = nil,
-  input_buf     = nil,
-  input_win     = nil,
-  is_loading    = false,
-  line_msg_map  = {},
+  conversation   = nil,
+  account        = nil,
+  messages       = {},
+  buf            = nil,
+  win            = nil,
+  input_buf      = nil,
+  input_win      = nil,
+  is_loading     = false,
+  line_msg_map   = {},
+  unread_at_open = 0,
 }
 
 local function avatar_char(name_or_id)
@@ -116,23 +117,54 @@ local function render()
 
   local prev_day = nil
 
-  for _, msg in ipairs(state.messages) do
+  -- first_unread_idx: index of the first unread message (for "New messages" separator)
+  local unread_count     = state.unread_at_open or 0
+  local first_unread_idx = (unread_count > 0 and unread_count < #state.messages)
+    and (#state.messages - unread_count + 1) or nil
+
+  -- pre-compute which messages show a header (message grouping)
+  local show_headers = {}
+  do
+    local prev_sk = nil
+    local prev_d  = nil
+    for i, msg in ipairs(state.messages) do
+      local sk = msg.source or "unknown"
+      local d  = day_label(msg.timestamp or 0)
+      if d ~= prev_d or i == first_unread_idx then prev_sk = nil end
+      show_headers[i] = (sk ~= prev_sk)
+      prev_sk = sk
+      prev_d  = d
+    end
+  end
+
+  for i, msg in ipairs(state.messages) do
     local is_self  = msg.source == state.account
     local sender   = is_self and "You" or (conv and conv.name or msg.source or "?")
     local time_str = format_ts(msg.timestamp)
     local body     = msg.message or ""
     local attach   = msg.attachments and "📎 " or ""
+    local indent   = is_self and "        " or "    "
 
     -- date separator
     local this_day = day_label(msg.timestamp or 0)
     if this_day ~= prev_day then
-      prev_day       = this_day
-      local label    = this_day
-      local pad      = win_w - #label - 8
-      local bar      = string.rep("─", math.max(2, math.floor(pad / 2)))
-      local div_ln   = #lines
+      prev_day     = this_day
+      local label  = this_day
+      local pad    = win_w - #label - 8
+      local bar    = string.rep("─", math.max(2, math.floor(pad / 2)))
+      local div_ln = #lines
       table.insert(lines, "  " .. bar .. "  " .. label .. "  " .. bar)
       table.insert(specs, { hl = "SignalTime", line = div_ln, col_s = 0, col_e = -1 })
+    end
+
+    -- "New messages" separator
+    if i == first_unread_idx then
+      local label  = "New messages"
+      local pad    = win_w - #label - 8
+      local bar    = string.rep("─", math.max(2, math.floor(pad / 2)))
+      local sep_ln = #lines
+      table.insert(lines, "  " .. bar .. "  " .. label .. "  " .. bar)
+      table.insert(specs, { hl = "SignalUnread", line = sep_ln, col_s = 0, col_e = -1 })
     end
 
     local receipt_glyph, receipt_hl = "", nil
@@ -159,50 +191,61 @@ local function render()
     local av      = is_self and "Me" or avatar_char(sender)
     local av_hl_g = is_self and "SignalAvatarSelf" or avatar_hl(av_key)
 
-    local header_ln   = #lines
-    local header_line = "  " .. av .. " " .. sender .. "  " .. time_str .. receipt_glyph
-    table.insert(lines, header_line)
-    table.insert(specs, { hl = av_hl_g, line = header_ln, col_s = 2, col_e = 2 + #av })
-    table.insert(specs, {
-      hl = is_self and "SignalSenderSelf" or "SignalSenderOther",
-      line = header_ln, col_s = 2 + #av + 1, col_e = 2 + #av + 1 + #sender,
-    })
-    local time_s = 2 + #av + 1 + #sender + 2
-    local time_e = time_s + #time_str
-    table.insert(specs, { hl = "SignalTime", line = header_ln, col_s = time_s, col_e = time_e })
-    if receipt_hl then
-      table.insert(specs, { hl = receipt_hl, line = header_ln, col_s = time_e, col_e = -1 })
+    -- header (skipped for consecutive messages from same sender)
+    if show_headers[i] then
+      local header_ln   = #lines
+      local header_line = "  " .. av .. " " .. sender .. "  " .. time_str .. receipt_glyph
+      table.insert(lines, header_line)
+      if is_self then
+        table.insert(specs, { hl = "SignalMsgSelfBg", line = header_ln, col_s = 0, col_e = -1, hl_eol = true })
+      end
+      table.insert(specs, { hl = av_hl_g, line = header_ln, col_s = 2, col_e = 2 + #av })
+      table.insert(specs, {
+        hl = is_self and "SignalSenderSelf" or "SignalSenderOther",
+        line = header_ln, col_s = 2 + #av + 1, col_e = 2 + #av + 1 + #sender,
+      })
+      local time_s = 2 + #av + 1 + #sender + 2
+      local time_e = time_s + #time_str
+      table.insert(specs, { hl = "SignalTime", line = header_ln, col_s = time_s, col_e = time_e })
+      if receipt_hl then
+        table.insert(specs, { hl = receipt_hl, line = header_ln, col_s = time_e, col_e = -1 })
+      end
+      state.line_msg_map[header_ln + 1] = msg
     end
-    state.line_msg_map[header_ln + 1] = msg
 
+    -- quote block
     if msg.quote and type(msg.quote) == "table" then
-      local q_author = msg.quote.author
+      local q_author_id   = msg.quote.author
+      local q_author_name = q_author_id
       local conv_list = require("signal").get_state().conversations or {}
       for _, c in ipairs(conv_list) do
-        if c.id == q_author then q_author = c.name; break end
+        if c.id == q_author_id then q_author_name = c.name; break end
       end
-      if q_author == state.account then q_author = "You" end
-      local q_text = (msg.quote.text or ""):match("([^\n]*)")
-      local ql = #lines
-      table.insert(lines, "  \xe2\x94\x86 " .. q_author .. ": " .. q_text:sub(1, win_w - 12))
-      table.insert(specs, { hl = "SignalTime", line = ql, col_s = 0, col_e = -1 })
+      if q_author_id == state.account then q_author_name = "You" end
+      local q_author_hl = q_author_id == state.account and "SignalSenderSelf" or avatar_hl(q_author_id)
+      local q_text   = (msg.quote.text or ""):match("([^\n]*)")
+      local q_prefix = indent .. "\xe2\x94\x86 "
+      local ql       = #lines
+      table.insert(lines, q_prefix .. q_author_name .. ": " .. q_text:sub(1, win_w - #q_prefix - #q_author_name - 4))
+      table.insert(specs, { hl = "SignalQuoteBg",  line = ql, col_s = 0,          col_e = -1,                          hl_eol = true })
+      table.insert(specs, { hl = q_author_hl,      line = ql, col_s = #q_prefix,  col_e = #q_prefix + #q_author_name })
     end
 
     if msg.deleted then
       local del_ln = #lines
-      table.insert(lines, "    This message was deleted")
-      table.insert(specs, { hl = "SignalTime", line = del_ln, col_s = 4, col_e = -1 })
+      table.insert(lines, indent .. "This message was deleted")
+      table.insert(specs, { hl = "SignalTime", line = del_ln, col_s = #indent, col_e = -1 })
       state.line_msg_map[del_ln + 1] = msg
     else
       local body_lines = vim.split(body, "\n", { plain = true })
       for bi, bline in ipairs(body_lines) do
         local body_ln = #lines
-        local prefix  = bi == 1 and ("    " .. attach) or "    "
+        local prefix  = bi == 1 and (indent .. attach) or indent
         table.insert(lines, prefix .. bline)
         if is_self then
-          table.insert(specs, { hl = "SignalMsgSelfBg", line = body_ln, col_s = 0, col_e = -1, hl_eol = true })
+          table.insert(specs, { hl = "SignalMsgSelfBg", line = body_ln, col_s = 0,       col_e = -1, hl_eol = true })
         else
-          table.insert(specs, { hl = "SignalMsgBody", line = body_ln, col_s = 4, col_e = -1 })
+          table.insert(specs, { hl = "SignalMsgBody",   line = body_ln, col_s = #indent, col_e = -1 })
         end
         state.line_msg_map[body_ln + 1] = msg
       end
@@ -216,13 +259,17 @@ local function render()
         end
         if #parts > 0 then
           local rl = #lines
-          table.insert(lines, "    " .. table.concat(parts, "  "))
-          table.insert(specs, { hl = "SignalReaction", line = rl, col_s = 4, col_e = -1 })
+          table.insert(lines, indent .. table.concat(parts, "  "))
+          table.insert(specs, { hl = "SignalReaction", line = rl, col_s = #indent, col_e = -1 })
           state.line_msg_map[rl + 1] = msg
         end
       end
     end
-    table.insert(lines, "")
+
+    -- blank line only before messages that start a new group (or after the last message)
+    if i == #state.messages or show_headers[i + 1] then
+      table.insert(lines, "")
+    end
   end
 
   write_buf(lines, specs)
@@ -571,13 +618,14 @@ function M.refresh()
   render()
 end
 
-function M.open(conversation, account, buf, win)
-  state.conversation = conversation
-  state.account      = account
-  state.buf          = buf
-  state.win          = win
-  state.messages     = {}
-  state.line_msg_map = {}
+function M.open(conversation, account, buf, win, unread_at_open)
+  state.conversation   = conversation
+  state.account        = account
+  state.buf            = buf
+  state.win            = win
+  state.messages       = {}
+  state.line_msg_map   = {}
+  state.unread_at_open = unread_at_open or 0
   register_keymaps()
   M.refresh()
 end

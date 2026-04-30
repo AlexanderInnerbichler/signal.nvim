@@ -582,9 +582,10 @@ function M.register_keymaps()
     local conv = state.line_conv_map[cur]
     if conv then
       state.in_list = false
+      local unread_before = conv.unread or 0
       require("signal.notifs").clear_unread(conv.id)
       conv.unread = 0
-      require("signal.thread").open(conv, state.account, state.buf, state.win)
+      require("signal.thread").open(conv, state.account, state.buf, state.win, unread_before)
     end
   end)
   bmap("p", function()
@@ -636,9 +637,10 @@ function M.register_keymaps()
     }, function(conv)
       if not conv then return end
       state.in_list = false
+      local unread_before = conv.unread or 0
       require("signal.notifs").clear_unread(conv.id)
       conv.unread = 0
-      require("signal.thread").open(conv, state.account, state.buf, state.win)
+      require("signal.thread").open(conv, state.account, state.buf, state.win, unread_before)
     end)
   end)
 end
