@@ -91,32 +91,33 @@ function M.process_messages(messages)
     local ts  = (dm and dm.timestamp) or envelope.timestamp or 0
 
     if dm and type(dm.message) == "string" and src then
-      local last = state.seen_ts[src] or 0
+      local conv_id = (type(dm.groupInfo) == "table") and dm.groupInfo.groupId or src
+      local last = state.seen_ts[conv_id] or 0
       if ts > last then
-        state.seen_ts[src] = ts
-        state.unread[src]  = (state.unread[src] or 0) + 1
+        state.seen_ts[conv_id] = ts
+        state.unread[conv_id]  = (state.unread[conv_id] or 0) + 1
 
         local snippet  = dm.message:sub(1, 40)
         local time_str = fmt_ts(ts)
         local name     = src
 
         for _, c in ipairs(main_state.conversations or {}) do
-          if c.id == src then
+          if c.id == conv_id then
             name     = c.name
-            c.unread = state.unread[src]
+            c.unread = state.unread[conv_id]
             break
           end
         end
 
-        store.append(src, { source = src, message = dm.message, timestamp = ts, is_self = false })
+        store.append(conv_id, { source = src, message = dm.message, timestamp = ts, is_self = false })
 
         local thread = require("signal.thread")
-        if thread.get_current_conv_id() == src then
+        if thread.get_current_conv_id() == conv_id then
           thread.append_message({ source = src, message = dm.message, timestamp = ts })
         end
 
         show_toast(name .. ": " .. snippet)
-        signal_init.update_snippet(src, snippet, time_str)
+        signal_init.update_snippet(conv_id, snippet, time_str)
       end
     end
 
@@ -143,7 +144,7 @@ function M.process_messages(messages)
     local sm      = sync and sync.sentMessage
     if sm and type(sm.message) == "string" then
       local dest_id
-      if sm.groupInfo then
+      if type(sm.groupInfo) == "table" then
         dest_id = sm.groupInfo.groupId
       else
         dest_id = sm.destinationNumber or sm.destination
