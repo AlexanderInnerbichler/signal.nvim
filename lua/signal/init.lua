@@ -344,6 +344,7 @@ render_list = function()
     table.insert(lines, "  " .. frame .. "  Syncing contacts…")
     table.insert(specs, { hl = "SignalLoading", line = status_ln, col_s = 0, col_e = -1 })
     table.insert(lines, "")
+    if #state.conversations == 0 then write_buf(lines, specs); return end
   elseif state.auth_error then
     table.insert(lines, "  ✗  Not linked to Signal.")
     table.insert(specs, { hl = "SignalSetupErr", line = status_ln, col_s = 0, col_e = -1 })
