@@ -454,6 +454,10 @@ render_list = function()
   local chats    = vim.tbl_filter(function(c) return c.snippet ~= nil and c.snippet ~= "" end, unpinned)
   local contacts = vim.tbl_filter(function(c) return c.snippet == nil  or c.snippet == "" end, unpinned)
 
+  local by_recency = function(a, b) return (a.last_ts or 0) > (b.last_ts or 0) end
+  table.sort(pinned, by_recency)
+  table.sort(chats,  by_recency)
+
   if not note_self and #pinned == 0 and #chats == 0 and #contacts == 0 then
     write_buf({ "", "  No conversations yet.", "",
       "  Link your device and start chatting from your phone." }, {
@@ -768,17 +772,17 @@ function M.fetch_and_render()
       local snippet_map = {}
       for _, c in ipairs(state.conversations) do
         if c.snippet and c.snippet ~= "" then
-          snippet_map[c.id] = { snippet = c.snippet, time = c.time }
+          snippet_map[c.id] = { snippet = c.snippet, time = c.time, last_ts = c.last_ts }
         end
       end
       for _, c in ipairs(cache.convs) do
         if not snippet_map[c.id] and c.snippet and c.snippet ~= "" then
-          snippet_map[c.id] = { snippet = c.snippet, time = c.time }
+          snippet_map[c.id] = { snippet = c.snippet, time = c.time, last_ts = c.last_ts }
         end
       end
       for _, c in ipairs(convs) do
         local s = snippet_map[c.id]
-        if s then c.snippet = s.snippet; c.time = s.time end
+        if s then c.snippet = s.snippet; c.time = s.time; c.last_ts = s.last_ts end
       end
 
       state.conversations = convs
@@ -927,11 +931,12 @@ function M.render_list()
 end
 
 -- called by notifs when a new message updates a conversation
-function M.update_snippet(id, snippet, time_str)
+function M.update_snippet(id, snippet, time_str, ts)
   for _, c in ipairs(state.conversations) do
     if c.id == id then
       c.snippet = snippet
       c.time    = time_str or c.time
+      c.last_ts = ts or c.last_ts
       break
     end
   end

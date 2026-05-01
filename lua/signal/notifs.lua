@@ -122,7 +122,7 @@ function M.process_messages(messages)
         end
 
         show_toast(name .. ": " .. snippet)
-        signal_init.update_snippet(conv_id, snippet, time_str)
+        signal_init.update_snippet(conv_id, snippet, time_str, ts)
       end
     end
 
@@ -165,7 +165,7 @@ function M.process_messages(messages)
           timestamp = sm_ts,
           is_self   = true,
         })
-        signal_init.update_snippet(dest_id, snippet, time_str)
+        signal_init.update_snippet(dest_id, snippet, time_str, sm_ts)
       end
     end
   end
